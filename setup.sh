@@ -202,8 +202,11 @@ phase1_system_preparation() {
         return
     fi
     
+    print_status "Cleaning apt cache to prevent corrupted packages..."
+    apt clean
+    
     print_status "Updating system packages..."
-    apt update && apt upgrade -y
+    apt update --fix-missing && apt upgrade -y
     
     print_status "Installing system dependencies..."
     apt install -y \
@@ -242,9 +245,9 @@ phase2_audio_setup() {
     fi
     
     if [[ "$AUDIO_HARDWARE" == "iqaudio" ]]; then
-        configure_iqaudio_codec()
+        configure_iqaudio_codec
     elif [[ "$AUDIO_HARDWARE" == "usb" ]]; then
-        configure_usb_audio()
+        configure_usb_audio
     else
         print_error "Unknown audio hardware: $AUDIO_HARDWARE"
         exit 1
