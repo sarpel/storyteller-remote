@@ -1,0 +1,156 @@
+# StorytellerPi Requirements - Pi Zero 2W Optimized
+# Minimal dependencies for maximum performance on limited hardware
+
+# =============================================================================
+# CORE DEPENDENCIES (Essential - Always Required)
+# =============================================================================
+
+# Configuration and Environment
+python-dotenv==1.0.0
+
+# Core Python Libraries (lightweight versions)
+asyncio-mqtt==0.16.1
+psutil==5.9.6
+
+# Audio Processing (Essential)
+PyAudio==0.2.11
+pygame==2.5.2
+
+# Networking (Minimal)
+requests==2.31.0
+
+# =============================================================================
+# WEB INTERFACE (Lightweight Flask - No SocketIO)
+# =============================================================================
+
+# Minimal Flask setup
+Flask==2.3.3
+Werkzeug==2.3.7
+Jinja2==3.1.2
+MarkupSafe==2.1.3
+
+# =============================================================================
+# WAKE WORD DETECTION (Choose ONE - Porcupine Recommended)
+# =============================================================================
+
+# Porcupine (Most efficient for Pi Zero 2W)
+pvporcupine==3.0.1
+
+# Alternative: OpenWakeWord (Uncomment if preferred, comment out Porcupine)
+# openwakeword==0.5.1
+# numpy==1.24.3
+
+# Alternative: TensorFlow Lite (Uncomment if using custom models)
+# tflite-runtime==2.13.0
+# numpy==1.24.3
+
+# =============================================================================
+# AI SERVICES (Choose based on your setup)
+# =============================================================================
+
+# Google Cloud Services (Recommended - Offloads processing)
+google-cloud-speech==2.21.0
+google-generativeai==0.3.2
+google-auth==2.23.4
+
+# OpenAI Services (Alternative)
+# openai==1.3.0
+
+# ElevenLabs TTS (Alternative)
+# elevenlabs==0.2.26
+
+# =============================================================================
+# OPTIONAL DEPENDENCIES (Install only if needed)
+# =============================================================================
+
+# Audio Processing (only if advanced features needed)
+# pydub==0.25.1
+
+# Development Tools (only for development)
+# pytest==7.4.3
+
+# =============================================================================
+# INSTALLATION INSTRUCTIONS FOR PI ZERO 2W
+# =============================================================================
+
+# 1. Basic installation (minimal footprint):
+#    pip install --no-cache-dir --prefer-binary -r requirements_pi_zero.txt
+
+# 2. Install system dependencies first:
+#    sudo apt update
+#    sudo apt install -y python3-pip python3-dev build-essential
+#    sudo apt install -y portaudio19-dev libasound2-dev
+#    sudo apt install -y pulseaudio pulseaudio-utils
+
+# 3. Optimize pip for Pi Zero 2W:
+#    pip install --upgrade pip
+#    pip config set global.extra-index-url https://www.piwheels.org/simple
+
+# 4. Install with memory optimization:
+#    pip install --no-cache-dir --prefer-binary --no-deps pvporcupine==3.0.1
+#    pip install --no-cache-dir --prefer-binary --no-deps python-dotenv==1.0.0
+#    pip install --no-cache-dir --prefer-binary --no-deps Flask==2.3.3
+#    pip install --no-cache-dir --prefer-binary --no-deps PyAudio==0.2.11
+#    pip install --no-cache-dir --prefer-binary --no-deps pygame==2.5.2
+#    pip install --no-cache-dir --prefer-binary --no-deps psutil==5.9.6
+#    pip install --no-cache-dir --prefer-binary --no-deps requests==2.31.0
+#    pip install --no-cache-dir --prefer-binary --no-deps google-cloud-speech==2.21.0
+#    pip install --no-cache-dir --prefer-binary --no-deps google-generativeai==0.3.2
+
+# =============================================================================
+# MEMORY OPTIMIZATION NOTES
+# =============================================================================
+
+# Pi Zero 2W has 512MB RAM - these optimizations help:
+# 
+# 1. Use Porcupine instead of OpenWakeWord (saves ~100MB)
+# 2. No NumPy unless absolutely needed (saves ~50MB)
+# 3. No TensorFlow unless using custom models (saves ~200MB)
+# 4. Minimal Flask without SocketIO (saves ~30MB)
+# 5. Lazy loading of services (saves ~50MB at startup)
+# 6. Use Google Cloud services (offloads processing)
+# 7. Enable swap if needed: sudo dphys-swapfile swapoff && sudo dphys-swapfile swapon
+
+# =============================================================================
+# PERFORMANCE TUNING
+# =============================================================================
+
+# Environment variables for Pi Zero 2W:
+# WAKE_WORD_FRAMEWORK=porcupine
+# WAKE_WORD_BUFFER_SIZE=512
+# MAX_MEMORY_USAGE=350
+# TARGET_RESPONSE_TIME=15.0
+# LOG_LEVEL=WARNING
+# ENABLE_MEMORY_MONITORING=true
+# GC_FREQUENCY=30
+
+# =============================================================================
+# TROUBLESHOOTING
+# =============================================================================
+
+# If installation fails:
+# 1. Increase swap space: sudo dphys-swapfile swapoff && sudo nano /etc/dphys-swapfile
+#    Set CONF_SWAPSIZE=1024, then: sudo dphys-swapfile setup && sudo dphys-swapfile swapon
+# 2. Install packages one by one with --no-deps flag
+# 3. Use --no-cache-dir to avoid running out of space
+# 4. Reboot between major installations
+
+# Memory issues during runtime:
+# 1. Monitor with: watch -n 1 free -m
+# 2. Check logs: journalctl -u storytellerpi -f
+# 3. Adjust MAX_MEMORY_USAGE in .env
+# 4. Enable aggressive garbage collection
+
+# =============================================================================
+# MINIMAL INSTALLATION (Emergency/Testing)
+# =============================================================================
+
+# If even this is too much, use this minimal set:
+# python-dotenv==1.0.0
+# Flask==2.3.3
+# PyAudio==0.2.11
+# pvporcupine==3.0.1
+# requests==2.31.0
+# psutil==5.9.6
+
+# This gives you basic wake word detection and web interface (~150MB total)
