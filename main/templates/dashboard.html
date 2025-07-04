@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - StorytellerPi{% endblock %}
+
+{% block content %}
+<!-- Service Status Card -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <i class="fas fa-heartbeat"></i>
+            Service Status
+        </h2>
+        <div class="status service-status {{ service_status.status }}">
+            <i class="fas fa-circle"></i>
+            {{ service_status.status.title() }}
+        </div>
+    </div>
+    
+    <div class="grid grid-3">
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-{{ 'play' if service_status.active else 'stop' }}"></i>
+            </div>
+            <div class="stat-label">Service {{ 'Running' if service_status.active else 'Stopped' }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-{{ 'check' if service_status.enabled else 'times' }}"></i>
+            </div>
+            <div class="stat-label">Auto-start {{ 'Enabled' if service_status.enabled else 'Disabled' }}</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="stat-label">Uptime</div>
+        </div>
+    </div>
+    
+    <div style="margin-top: 20px; display: flex; gap: 12px; flex-wrap: wrap;">
+        <button class="btn btn-success" onclick="controlService('start')" 
+                {% if service_status.active %}disabled{% endif %}>
+            <i class="fas fa-play"></i>
+            Start Service
+        </button>
+        <button class="btn btn-danger" onclick="controlService('stop')"
+                {% if not service_status.active %}disabled{% endif %}>
+            <i class="fas fa-stop"></i>
+            Stop Service
+        </button>
+        <button class="btn btn-warning" onclick="controlService('restart')">
+            <i class="fas fa-redo"></i>
+            Restart Service
+        </button>
+    </div>
+</div>
+
+<!-- System Monitoring -->
+<div class="grid grid-2">
+    <!-- System Stats -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i class="fas fa-server"></i>
+                System Performance
+            </h2>
+        </div>
+        
+        <div class="grid grid-2">
+            <div class="stat">
+                <div class="stat-value cpu-usage">{{ "%.1f"|format(system_info.cpu_percent or 0) }}%</div>
+                <div class="stat-label">CPU Usage</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value memory-usage">{{ "%.1f"|format(system_info.memory_percent or 0) }}%</div>
+                <div class="stat-label">Memory Usage</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value temperature">
+                    {% if system_info.temperature %}
+                        {{ "%.1f"|format(system_info.temperature) }}°C
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </div>
+                <div class="stat-label">Temperature</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">{{ system_info.disk_percent or 0 }}%</div>
+                <div class="stat-label">Disk Usage</div>
+            </div>
+        </div>
+        
+        <!-- Memory and Disk Details -->
+        <div style="margin-top: 20px;">
+            <div style="margin-bottom: 12px;">
+                <strong>Memory:</strong> {{ system_info.memory_used or 0 }}MB / {{ system_info.memory_total or 0 }}MB
+            </div>
+            <div>
+                <strong>Disk:</strong> {{ system_info.disk_used or 0 }}GB / {{ system_info.disk_total or 0 }}GB
+            </div>
+        </div>
+    </div>
+    
+    <!-- Quick Tests -->
+    <div class="card">
+        <div class="card-header">
+            <h2 class="card-title">
+                <i class="fas fa-flask"></i>
+                System Tests
+            </h2>
+        </div>
+        
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+            <button class="btn btn-secondary" onclick="testComponent('audio')">
+                <i class="fas fa-volume-up"></i>
+                Test Audio Output
+            </button>
+            <button class="btn btn-secondary" onclick="testComponent('microphone')">
+                <i class="fas fa-microphone"></i>
+                Test Microphone
+            </button>
+            <button class="btn btn-secondary" onclick="testComponent('wake_word')">
+                <i class="fas fa-ear-listen"></i>
+                Test Wake Word
+            </button>
+        </div>
+        
+        <div id="test-results" style="margin-top: 16px;"></div>
+    </div>
+</div>
+
+<!-- Quick Actions -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <i class="fas fa-magic"></i>
+            Quick Actions
+        </h2>
+    </div>
+    
+    <div class="grid grid-3">
+        <button class="btn btn-primary" onclick="sayHello()">
+            <i class="fas fa-comment"></i>
+            Say Hello
+        </button>
+        <button class="btn btn-primary" onclick="tellStory()">
+            <i class="fas fa-book"></i>
+            Tell a Story
+        </button>
+        <button class="btn btn-primary" onclick="openSettings()">
+            <i class="fas fa-cog"></i>
+            Open Settings
+        </button>
+    </div>
+</div>
+
+<!-- Recent Activity -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <i class="fas fa-history"></i>
+            Recent Activity
+        </h2>
+        <button class="btn btn-secondary" onclick="refreshLogs()">
+            <i class="fas fa-refresh"></i>
+            Refresh
+        </button>
+    </div>
+    
+    <div id="logs-container" style="max-height: 300px; overflow-y: auto; background: var(--light-bg); padding: 16px; border-radius: 8px; font-family: monospace; font-size: 0.875rem;">
+        {% for log in recent_logs %}
+            {% if log.strip() %}
+                <div style="margin-bottom: 4px; color: var(--text-secondary);">{{ log }}</div>
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Configuration Status -->
+<div class="card">
+    <div class="card-header">
+        <h2 class="card-title">
+            <i class="fas fa-key"></i>
+            Configuration Status
+        </h2>
+    </div>
+    
+    <div class="grid grid-2">
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
+            </div>
+            <div class="stat-label">Gemini API</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-question-circle" style="color: var(--warning-color);"></i>
+            </div>
+            <div class="stat-label">OpenAI API</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-times-circle" style="color: var(--danger-color);"></i>
+            </div>
+            <div class="stat-label">ElevenLabs API</div>
+        </div>
+        <div class="stat">
+            <div class="stat-value">
+                <i class="fas fa-check-circle" style="color: var(--success-color);"></i>
+            </div>
+            <div class="stat-label">Wake Word Model</div>
+        </div>
+    </div>
+    
+    <div style="margin-top: 16px;">
+        <a href="/settings" class="btn btn-primary">
+            <i class="fas fa-cog"></i>
+            Configure APIs
+        </a>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Service control functions
+    async function controlService(action) {
+        const button = event.target;
+        const originalText = button.innerHTML;
+        
+        // Show loading state
+        button.disabled = true;
+        button.innerHTML = '<span class="loading"></span> Processing...';
+        
+        try {
+            const response = await fetch(`/api/service/${action}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showAlert(data.message, 'success');
+                // Refresh page after a short delay
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                showAlert(data.message, 'danger');
+            }
+        } catch (error) {
+            showAlert('Failed to ' + action + ' service', 'danger');
+        } finally {
+            button.disabled = false;
+            button.innerHTML = originalText;
+        }
+    }
+    
+    // Component testing functions
+    async function testComponent(component) {
+        const resultsDiv = document.getElementById('test-results');
+        resultsDiv.innerHTML = '<div class="loading"></div> Testing ' + component + '...';
+        
+        try {
+            const response = await fetch(`/api/test/${component}`);
+            const data = await response.json();
+            
+            const resultClass = data.success ? 'alert-success' : 'alert-danger';
+            const icon = data.success ? 'check-circle' : 'exclamation-circle';
+            
+            resultsDiv.innerHTML = `
+                <div class="alert ${resultClass}">
+                    <i class="fas fa-${icon}"></i>
+                    ${data.message}
+                </div>
+            `;
+        } catch (error) {
+            resultsDiv.innerHTML = `
+                <div class="alert alert-danger">
+                    <i class="fas fa-exclamation-circle"></i>
+                    Test failed: ${error.message}
+                </div>
+            `;
+        }
+    }
+    
+    // Quick action functions
+    function sayHello() {
+        showAlert('Hello! I\'m StorytellerPi, ready to tell amazing stories!', 'success');
+    }
+    
+    function tellStory() {
+        showAlert('Once upon a time, there was a magical Raspberry Pi that could tell wonderful stories...', 'success');
+    }
+    
+    function openSettings() {
+        window.location.href = '/settings';
+    }
+    
+    // Refresh logs
+    async function refreshLogs() {
+        try {
+            const response = await fetch('/api/logs?lines=10');
+            const data = await response.json();
+            
+            const logsContainer = document.getElementById('logs-container');
+            logsContainer.innerHTML = data.logs
+                .filter(log => log.trim())
+                .map(log => `<div style="margin-bottom: 4px; color: var(--text-secondary);">${log}</div>`)
+                .join('');
+        } catch (error) {
+            showAlert('Failed to refresh logs', 'danger');
+        }
+    }
+    
+    // Auto-refresh system stats every 30 seconds
+    setInterval(async () => {
+        try {
+            const response = await fetch('/api/system/status');
+            const data = await response.json();
+            updateStatus(data);
+        } catch (error) {
+            console.error('Failed to update status:', error);
+        }
+    }, 30000);
+</script>
+{% endblock %}
