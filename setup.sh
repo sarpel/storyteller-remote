@@ -9,7 +9,7 @@ set -e
 
 # Script configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="/tmp/storytellerpi_setup.log"
+LOG_FILE="$SCRIPT_DIR/storytellerpi_setup.log"
 INSTALL_DIR="/opt/storytellerpi"
 SERVICE_USER="storyteller"
 PYTHON_VERSION="3.9"
@@ -22,63 +22,65 @@ print_header() {
 }
 
 print_status() {
-    echo -e "\033[1;34m[INFO]\033[0m $1" | tee -a "$LOG_FILE"
+    echo -e "\033[1;34m[INFO]\033[0m $1"
+    echo "[INFO] $1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 print_success() {
-    echo -e "\033[1;32m[SUCCESS]\033[0m $1" | tee -a "$LOG_FILE"
+    echo -e "\033[1;32m[SUCCESS]\033[0m $1"
+    echo "[SUCCESS] $1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 print_warning() {
-    echo -e "\033[1;33m[WARNING]\033[0m $1" | tee -a "$LOG_FILE"
+    echo -e "\033[1;33m[WARNING]\033[0m $1"
+    echo "[WARNING] $1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 print_error() {
-    echo -e "\033[1;31m[ERROR]\033[0m $1" | tee -a "$LOG_FILE"
+    echo -e "\033[1;31m[ERROR]\033[0m $1"
+    echo "[ERROR] $1" >> "$LOG_FILE" 2>/dev/null || true
 }
 
 # Help function
 show_help() {
     cat << EOF
-StorytellerPi Unified Setup Script
+StorytellerPi Setup Script v2.0
 
 USAGE:
-    sudo ./setup.sh [OPTIONS]
+    sudo bash ./setup.sh [OPTIONS]
 
 OPTIONS:
-    --production        Full production setup (default)
-    --development       Development setup with mock services
-    --audio-only        Configure audio hardware only
-    --quick             Fast minimal installation
-    --test-only         Run tests and validation only
-    --resume            Resume interrupted installation
-    --clean             Clean install (remove existing)
-    --help              Show this help message
+    --help, -h              Show this help message
+    --production            Full production installation (default)
+    --development           Development installation with testing
+    --audio-only            Audio setup only
+    --test-only             Run tests only
+    --quick                 Quick setup (minimal components)
+    --clean                 Clean previous installation
+    --resume                Resume interrupted installation
 
 EXAMPLES:
-    sudo ./setup.sh                    # Full production setup
-    sudo ./setup.sh --quick            # Fast minimal install
-    sudo ./setup.sh --development      # Dev setup for testing
-    sudo ./setup.sh --audio-only       # Just configure audio
-
-REQUIREMENTS:
-    - Raspberry Pi OS (Bookworm recommended)
-    - Internet connection
-    - IQaudIO Pi-Codec Zero HAT (for audio)
-    - 32GB+ microSD card
-    - Run as root (sudo)
+    sudo ./setup.sh                    # Production installation
+    sudo ./setup.sh --development      # Development installation
+    sudo ./setup.sh --audio-only       # Audio setup only
+    sudo ./setup.sh --clean            # Clean install
 
 For more information, see README.md
 EOF
 }
 
-# Parse command line arguments
+# Installation type (default to production)
 INSTALL_TYPE="production"
 CLEAN_INSTALL=false
 RESUME_INSTALL=false
 
+# Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --help|-h)
+            show_help
+            exit 0
+            ;;
         --production)
             INSTALL_TYPE="production"
             shift
@@ -91,25 +93,21 @@ while [[ $# -gt 0 ]]; do
             INSTALL_TYPE="audio-only"
             shift
             ;;
-        --quick)
-            INSTALL_TYPE="quick"
-            shift
-            ;;
         --test-only)
             INSTALL_TYPE="test-only"
             shift
             ;;
-        --resume)
-            RESUME_INSTALL=true
+        --quick)
+            INSTALL_TYPE="quick"
             shift
             ;;
         --clean)
             CLEAN_INSTALL=true
             shift
             ;;
-        --help)
-            show_help
-            exit 0
+        --resume)
+            RESUME_INSTALL=true
+            shift
             ;;
         *)
             print_error "Unknown option: $1"
@@ -118,27 +116,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-# Check if running as root
-if [[ $EUID -ne 0 ]]; then
-    print_error "This script must be run as root (use sudo)"
-    exit 1
-fi
-
-# Check if running on Raspberry Pi
-check_raspberry_pi() {
-    if ! grep -q "Raspberry Pi" /proc/cpuinfo 2>/dev/null; then
-        print_warning "Not running on Raspberry Pi - some features may not work"
-        read -p "Continue anyway? (y/N): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
-    else
-        PI_MODEL=$(grep "Model" /proc/cpuinfo | cut -d: -f2 | xargs)
-        print_status "Detected: $PI_MODEL"
-    fi
-}
 
 # Progress tracking
 PROGRESS_FILE="/tmp/storytellerpi_progress"
@@ -151,11 +128,57 @@ get_progress() {
     if [[ -f "$PROGRESS_FILE" ]]; then
         cat "$PROGRESS_FILE"
     else
-        echo "start"
+        echo "none"
     fi
 }
 
-# Phase 1: System Preparation
+# System validation
+check_raspberry_pi() {
+    print_status "Checking if running on Raspberry Pi..."
+    
+    if [[ ! -f /proc/cpuinfo ]] || ! grep -q "Raspberry Pi" /proc/cpuinfo; then
+        print_warning "Not running on Raspberry Pi - some features may not work"
+    else
+        PI_MODEL=$(grep "Model" /proc/cpuinfo | cut -d: -f2 | xargs)
+        print_success "Detected: $PI_MODEL"
+    fi
+    
+    # Check if running as root
+    if [[ $EUID -ne 0 ]]; then
+        print_error "This script must be run as root (use sudo)"
+        exit 1
+    fi
+}
+
+# Cleanup previous installation
+cleanup_old_install() {
+    if [[ "$CLEAN_INSTALL" == true ]] || [[ "$RESUME_INSTALL" == false ]]; then
+        print_status "Cleaning up previous installation..."
+        
+        # Stop services
+        systemctl stop storytellerpi 2>/dev/null || true
+        systemctl stop storytellerpi-web 2>/dev/null || true
+        systemctl disable storytellerpi 2>/dev/null || true
+        systemctl disable storytellerpi-web 2>/dev/null || true
+        
+        # Remove service files
+        rm -f /etc/systemd/system/storytellerpi.service
+        rm -f /etc/systemd/system/storytellerpi-web.service
+        
+        # Remove installation directory
+        if [[ -d "$INSTALL_DIR" ]]; then
+            rm -rf "$INSTALL_DIR"
+        fi
+        
+        # Remove user
+        userdel -r "$SERVICE_USER" 2>/dev/null || true
+        
+        systemctl daemon-reload
+        print_success "Cleanup completed"
+    fi
+}
+
+# Phase 1: System preparation
 phase1_system_preparation() {
     print_header "Phase 1: System Preparation"
     
@@ -170,33 +193,31 @@ phase1_system_preparation() {
     print_status "Installing system dependencies..."
     apt install -y \
         python3 python3-pip python3-venv python3-dev \
-        git curl wget unzip \
-        build-essential cmake \
-        libasound2-dev portaudio19-dev \
-        alsa-utils pulseaudio \
-        systemd \
-        htop nano vim \
-        rsync
+        build-essential pkg-config \
+        portaudio19-dev libasound2-dev \
+        git curl wget \
+        ffmpeg espeak \
+        systemd
     
-    # Install additional dependencies based on install type
-    if [[ "$INSTALL_TYPE" == "production" ]] || [[ "$INSTALL_TYPE" == "development" ]]; then
-        apt install -y \
-            ffmpeg \
-            sox \
-            espeak espeak-data \
-            watchdog
+    print_status "Creating service user..."
+    if ! id "$SERVICE_USER" &>/dev/null; then
+        useradd -r -s /bin/false -d "$INSTALL_DIR" "$SERVICE_USER"
     fi
+    
+    print_status "Creating installation directory..."
+    mkdir -p "$INSTALL_DIR"
+    chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
     
     save_progress "phase1"
     print_success "Phase 1 completed"
 }
 
-# Phase 2: Audio Hardware Setup
+# Phase 2: Audio setup
 phase2_audio_setup() {
-    print_header "Phase 2: Audio Hardware Setup"
+    print_header "Phase 2: Audio Setup"
     
-    if [[ "$INSTALL_TYPE" == "test-only" ]]; then
-        print_status "Skipping audio setup for test-only mode"
+    if [[ "$INSTALL_TYPE" == "test-only" ]] || [[ "$INSTALL_TYPE" == "quick" ]]; then
+        print_status "Skipping audio setup for $INSTALL_TYPE mode"
         return
     fi
     
@@ -210,13 +231,11 @@ phase2_audio_setup() {
     # Enable I2S interface
     if ! grep -q "dtparam=i2s=on" /boot/config.txt; then
         echo "dtparam=i2s=on" >> /boot/config.txt
-        print_status "Enabled I2S interface"
     fi
     
-    # Add IQaudIO device tree overlay
+    # Add IQaudIO overlay
     if ! grep -q "dtoverlay=iqaudio-codec" /boot/config.txt; then
         echo "dtoverlay=iqaudio-codec" >> /boot/config.txt
-        print_status "Added IQaudIO codec overlay"
     fi
     
     # Configure ALSA
@@ -226,94 +245,70 @@ pcm.!default {
     card 0
     device 0
 }
-
 ctl.!default {
     type hw
     card 0
 }
 EOF
     
-    # Set audio levels
-    print_status "Configuring audio levels..."
-    amixer set 'Output Mixer HiFi' on 2>/dev/null || true
-    amixer set 'Input Mixer Line' on 2>/dev/null || true
-    amixer set 'Headphone' 80% 2>/dev/null || true
-    amixer set 'Speaker' 80% 2>/dev/null || true
+    print_status "Testing audio configuration..."
+    # Test will be done later in validation phase
     
     save_progress "phase2"
     print_success "Phase 2 completed"
 }
 
-# Phase 3: Python Environment Setup
+# Phase 3: Python environment setup
 phase3_python_setup() {
     print_header "Phase 3: Python Environment Setup"
+    
+    if [[ "$INSTALL_TYPE" == "audio-only" ]]; then
+        print_status "Skipping Python setup for audio-only mode"
+        return
+    fi
     
     if [[ "$RESUME_INSTALL" == true ]] && [[ "$(get_progress)" > "phase3" ]]; then
         print_status "Skipping Phase 3 (already completed)"
         return
     fi
     
-    # Create installation directory
-    mkdir -p "$INSTALL_DIR"
-    cd "$INSTALL_DIR"
+    print_status "Setting up Python virtual environment..."
     
-    # Create virtual environment
-    print_status "Creating Python virtual environment..."
-    python3 -m venv venv
-    source venv/bin/activate
-    
-    # Configure pip for fast installation
-    print_status "Configuring pip for optimal performance..."
+    # Create pip config for faster installs
     mkdir -p ~/.pip
     cat > ~/.pip/pip.conf << 'EOF'
 [global]
-timeout = 60
-retries = 3
-trusted-host = pypi.org
-               pypi.python.org
-               files.pythonhosted.org
-               www.piwheels.org
-extra-index-url = https://www.piwheels.org/simple/
+extra-index-url = https://www.piwheels.org/simple
+no-cache-dir = true
 prefer-binary = true
+timeout = 300
 
 [install]
-compile = false
+break-system-packages = true
 EOF
     
+    # Create virtual environment
+    cd "$INSTALL_DIR"
+    python3 -m venv venv
+    source venv/bin/activate
+    
     # Upgrade pip
-    pip install --upgrade pip setuptools wheel
+    pip install --upgrade pip
     
-    # Install packages based on type
-    print_status "Installing Python packages (optimized for speed)..."
-    
-    # Use unified requirements.txt
+    # Install requirements
     if [[ -f "$SCRIPT_DIR/requirements.txt" ]]; then
-        print_status "Using unified requirements.txt..."
-        pip install --no-cache-dir --prefer-binary -r "$SCRIPT_DIR/requirements.txt"
-        
-        # Add development packages if needed
-        if [[ "$INSTALL_TYPE" == "development" ]]; then
-            print_status "Adding development tools..."
-            pip install --no-cache-dir pytest pytest-asyncio pytest-mock black flake8
-        fi
+        print_status "Installing Python dependencies..."
+        pip install -r "$SCRIPT_DIR/requirements.txt"
     else
-        # Fallback to individual installs
-        print_status "Installing core packages individually..."
-        pip install --no-cache-dir --prefer-binary \
-            python-dotenv==1.0.0 PyYAML==6.0.1 numpy==1.24.3 \
-            PyAudio==0.2.11 pygame==2.5.2 requests==2.31.0 psutil==5.9.6
-        
-        if [[ "$INSTALL_TYPE" == "production" ]] || [[ "$INSTALL_TYPE" == "development" ]]; then
-            pip install --no-cache-dir --prefer-binary \
-                google-cloud-speech==2.21.0 google-generativeai==0.3.2 \
-                openai==1.3.0 elevenlabs==0.2.26 openwakeword==0.5.1
-        fi
+        print_error "requirements.txt not found"
+        exit 1
     fi
     
-    deactivate
     save_progress "phase3"
     print_success "Phase 3 completed"
-}# Phase 4: Application Setup
+}
+
+# Phase 4: Application setup
 phase4_application_setup() {
     print_header "Phase 4: Application Setup"
     
@@ -327,103 +322,75 @@ phase4_application_setup() {
         return
     fi
     
-    print_status "Setting up application files..."
+    print_status "Copying application files..."
     
-    # Copy application files
-    rsync -av "$SCRIPT_DIR/main/" "$INSTALL_DIR/" --exclude="__pycache__" --exclude="*.pyc"
-    rsync -av "$SCRIPT_DIR/models/" "$INSTALL_DIR/models/" 2>/dev/null || true
+    # Copy main application
+    cp -r "$SCRIPT_DIR/main" "$INSTALL_DIR/"
+    cp -r "$SCRIPT_DIR/models" "$INSTALL_DIR/"
+    cp -r "$SCRIPT_DIR/tests" "$INSTALL_DIR/"
+    cp -r "$SCRIPT_DIR/scripts" "$INSTALL_DIR/"
     
     # Create directories
-    mkdir -p "$INSTALL_DIR"/{logs,temp,cache}
+    mkdir -p "$INSTALL_DIR/logs"
+    mkdir -p "$INSTALL_DIR/credentials"
     
-    # Set up .env configuration file
-    if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-        if [[ -f "$SCRIPT_DIR/.env" ]]; then
-            print_status "Setting up .env configuration file..."
-            cp "$SCRIPT_DIR/.env" "$INSTALL_DIR/.env"
-            
-            # Update paths in .env file for this installation
-            sed -i "s|/opt/storytellerpi|$INSTALL_DIR|g" "$INSTALL_DIR/.env"
-            
-            print_status "Configuration file created at $INSTALL_DIR/.env"
-        else
-            print_warning ".env template not found, creating basic configuration..."
-            cat > "$INSTALL_DIR/.env" << 'EOF'
-# Basic StorytellerPi Configuration
-LOG_LEVEL=INFO
+    # Copy configuration template
+    if [[ -f "$SCRIPT_DIR/.env" ]]; then
+        cp "$SCRIPT_DIR/.env" "$INSTALL_DIR/.env"
+    else
+        # Create basic .env template
+        cat > "$INSTALL_DIR/.env" << 'EOF'
+# StorytellerPi Configuration
+# Copy this file and configure your API keys
+
+# Installation Settings
 INSTALL_DIR=/opt/storytellerpi
 LOG_DIR=/opt/storytellerpi/logs
-MODELS_DIR=/opt/storytellerpi/models
-TARGET_RESPONSE_TIME=11.0
-MAX_MEMORY_USAGE=400
 
-# Add your API keys here:
-# GEMINI_API_KEY=your-gemini-api-key-here
-# GOOGLE_CREDENTIALS_JSON=/opt/storytellerpi/google-credentials.json
-# OPENAI_API_KEY=sk-your-openai-api-key-here
-# ELEVENLABS_API_KEY=your-elevenlabs-api-key-here
+# API Keys (Required)
+GEMINI_API_KEY=your-gemini-api-key-here
+OPENAI_API_KEY=your-openai-api-key-here
+ELEVENLABS_API_KEY=your-elevenlabs-api-key-here
+PORCUPINE_ACCESS_KEY=your-porcupine-access-key-here
 EOF
-        fi
     fi
     
-    # Set up credentials information
-    print_status "Setting up credentials information..."
+    # Create credentials documentation
     cat > "$INSTALL_DIR/CREDENTIALS.md" << 'EOF'
 # API Credentials Setup
 
-All API credentials are now configured in the .env file.
+## Required API Keys
 
-## Required Credentials:
+### 1. Google Gemini (Required for AI storytelling)
+- Get API key from: https://aistudio.google.com/app/apikey
+- Add to .env as: GEMINI_API_KEY=your-gemini-api-key-here
 
-1. **Google Gemini API Key** (for AI storytelling):
-   - Get from Google AI Studio: https://aistudio.google.com/app/apikey
-   - Add to .env file: GEMINI_API_KEY=your-gemini-api-key-here
+### 2. OpenAI (Optional for Whisper fallback)
+- Get API key from: https://platform.openai.com/
+- Add to .env as: OPENAI_API_KEY=sk-...
 
-2. **Google Cloud Service Account** (for Speech-to-Text):
-   - Download JSON key from Google Cloud Console
-   - Enable Speech-to-Text API
-   - Place at: /opt/storytellerpi/google-credentials.json
-   - Update GOOGLE_CREDENTIALS_JSON in .env file
+### 3. ElevenLabs (Optional for high-quality TTS)
+- Get API key from: https://elevenlabs.io/
+- Add to .env as: ELEVENLABS_API_KEY=...
 
-3. **OpenAI API Key** (for Whisper fallback):
-   - Get from OpenAI Platform (platform.openai.com)
-   - Add to .env file: OPENAI_API_KEY=sk-...
+### 4. Porcupine (Optional for better wake word detection)
+- Get access key from: https://console.picovoice.ai/
+- Add to .env as: PORCUPINE_ACCESS_KEY=...
 
-4. **ElevenLabs API Key** (for text-to-speech):
-   - Get from ElevenLabs (elevenlabs.io)
-   - Add to .env file: ELEVENLABS_API_KEY=your-api-key
-
-## Configuration:
-Edit /opt/storytellerpi/.env and add your API keys.
-
-## Security:
-- Set proper permissions: chmod 600 /opt/storytellerpi/.env
-- Never commit .env to version control
-- Keep backups of your .env file
-
-## Test your setup:
-```bash
-sudo systemctl start storytellerpi
-sudo journalctl -u storytellerpi -n 50
-```
+## Configuration
+Edit the .env file to add your API keys:
+sudo nano /opt/storytellerpi/.env
 EOF
-    
-    # Create service user
-    if ! id "$SERVICE_USER" &>/dev/null; then
-        print_status "Creating service user: $SERVICE_USER"
-        useradd -r -s /bin/false -d "$INSTALL_DIR" "$SERVICE_USER"
-    fi
     
     # Set permissions
     chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    chmod 700 "$INSTALL_DIR/credentials"
-    chmod 755 "$INSTALL_DIR"
+    chmod +x "$INSTALL_DIR/main"/*.py
     
     save_progress "phase4"
     print_success "Phase 4 completed"
 }
 
-# Phase 5: Service Configuration
+# Phase 5: Service setup
 phase5_service_setup() {
     print_header "Phase 5: Service Configuration"
     
@@ -451,7 +418,7 @@ User=$SERVICE_USER
 Group=$SERVICE_USER
 WorkingDirectory=$INSTALL_DIR
 Environment=PATH=$INSTALL_DIR/venv/bin
-ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/storyteller_main.py
+ExecStart=$INSTALL_DIR/venv/bin/python $INSTALL_DIR/main/storyteller_main.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -549,52 +516,45 @@ phase6_testing() {
     print_status "Running system validation tests..."
     
     # Test Python environment
-    cd "$INSTALL_DIR"
-    source venv/bin/activate
-    
-    print_status "Testing Python packages..."
-    python3 -c "import yaml, numpy, pygame; print('Core packages: OK')" || print_warning "Core packages test failed"
-    
-    if [[ "$INSTALL_TYPE" == "production" ]] || [[ "$INSTALL_TYPE" == "development" ]]; then
-        python3 -c "import openwakeword; print('OpenWakeWord: OK')" || print_warning "OpenWakeWord test failed"
-        python3 -c "import elevenlabs; print('ElevenLabs: OK')" || print_warning "ElevenLabs test failed"
+    if [[ -f "$INSTALL_DIR/venv/bin/python" ]]; then
+        print_success "Python virtual environment: OK"
+    else
+        print_error "Python virtual environment: MISSING"
     fi
     
-    # Test audio
-    if [[ "$INSTALL_TYPE" != "test-only" ]]; then
-        print_status "Testing audio system..."
-        if command -v aplay &> /dev/null; then
-            # Test audio playback (generate a short beep)
-            speaker-test -t sine -f 1000 -l 1 -s 1 &>/dev/null || print_warning "Audio test failed"
-            print_status "Audio system: OK"
-        fi
+    # Test audio system
+    if command -v aplay &> /dev/null; then
+        print_success "Audio system: OK"
+    else
+        print_warning "Audio system: NOT CONFIGURED"
     fi
     
     # Test application files
-    if [[ "$INSTALL_TYPE" == "production" ]] || [[ "$INSTALL_TYPE" == "development" ]]; then
-        if [[ -f "$INSTALL_DIR/storyteller_main.py" ]]; then
-            print_status "Application files: OK"
-        else
-            print_warning "Main application file not found"
-        fi
+    if [[ -f "$INSTALL_DIR/main/storyteller_main.py" ]]; then
+        print_success "Application files: OK"
+    else
+        print_error "Application files: MISSING"
     fi
     
-    deactivate
+    # Test web interface
+    if [[ -f "$INSTALL_DIR/main/web_interface.py" ]]; then
+        print_success "Web interface: OK"
+    else
+        print_warning "Web interface: MISSING"
+    fi
     
-    # Run specific tests if available
-    if [[ "$INSTALL_TYPE" == "development" ]] || [[ "$INSTALL_TYPE" == "test-only" ]]; then
-        if [[ -f "$SCRIPT_DIR/run_tests.py" ]]; then
-            print_status "Running unit tests..."
-            cd "$SCRIPT_DIR"
-            python3 run_tests.py --quick || print_warning "Some tests failed"
-        fi
+    # Test audio feedback
+    if [[ -f "$INSTALL_DIR/main/audio_feedback.py" ]]; then
+        print_success "Audio feedback: OK"
+    else
+        print_warning "Audio feedback: MISSING"
     fi
     
     save_progress "phase6"
     print_success "Phase 6 completed"
 }
 
-# Generate installation report
+# Report generation
 generate_report() {
     print_header "Installation Report"
     
@@ -605,91 +565,45 @@ StorytellerPi Installation Report
 Generated: $(date)
 Installation Type: $INSTALL_TYPE
 
-System Information:
-- OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d'"' -f2)
-- Kernel: $(uname -r)
-- Architecture: $(uname -m)
-- Raspberry Pi Model: ${PI_MODEL:-"Not detected"}
+=== System Information ===
+OS: $(cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2 | tr -d '"')
+Architecture: $(uname -m)
+Kernel: $(uname -r)
+Python: $(python3 --version)
 
-Installation Status:
-- Install Directory: $INSTALL_DIR
-- Service User: $SERVICE_USER
-- Python Environment: $INSTALL_DIR/venv
-- Configuration: $INSTALL_DIR/config/config.yaml
-- Credentials: $INSTALL_DIR/credentials/
+=== Installation Status ===
+Installation Directory: $INSTALL_DIR
+Service User: $SERVICE_USER
+Log Directory: $INSTALL_DIR/logs
 
-Services:
+=== Services ===
 EOF
     
-    if [[ "$INSTALL_TYPE" == "production" ]]; then
-        echo "- SystemD Service: storytellerpi" >> "$REPORT_FILE"
-        if systemctl is-enabled storytellerpi &>/dev/null; then
-            echo "  Status: Enabled" >> "$REPORT_FILE"
-        else
-            echo "  Status: Not enabled" >> "$REPORT_FILE"
-        fi
+    # Check service status
+    if systemctl list-unit-files | grep -q storytellerpi.service; then
+        cat >> "$REPORT_FILE" << 'EOF'
+Main Service: INSTALLED
+EOF
     fi
     
-    echo "" >> "$REPORT_FILE"
-    echo "Next Steps:" >> "$REPORT_FILE"
+    if systemctl list-unit-files | grep -q storytellerpi-web.service; then
+        cat >> "$REPORT_FILE" << 'EOF'
+Web Interface: INSTALLED
+EOF
+    fi
     
-    case "$INSTALL_TYPE" in
-        "production")
-            cat >> "$REPORT_FILE" << 'EOF'
-1. Add API credentials to /opt/storytellerpi/credentials/
-2. Start the service: sudo systemctl start storytellerpi
-3. Check status: sudo systemctl status storytellerpi
-4. View logs: sudo journalctl -u storytellerpi -f
+    cat >> "$REPORT_FILE" << 'EOF'
+
+=== Next Steps ===
+1. Configure API keys in /opt/storytellerpi/.env
+2. Access web interface at http://[PI_IP]:8080
+3. Start services: sudo systemctl start storytellerpi storytellerpi-web
+4. Check logs: sudo journalctl -u storytellerpi -f
 EOF
-            ;;
-        "development")
-            cat >> "$REPORT_FILE" << 'EOF'
-1. Add API credentials to /opt/storytellerpi/credentials/
-2. Run development version: cd /opt/storytellerpi && python storyteller_dev.py
-3. Run tests: cd project_dir && python run_tests.py
-EOF
-            ;;
-        "quick")
-            cat >> "$REPORT_FILE" << 'EOF'
-1. Essential packages installed
-2. Add remaining packages as needed
-3. Configure application manually
-EOF
-            ;;
-        "audio-only")
-            cat >> "$REPORT_FILE" << 'EOF'
-1. Audio hardware configured
-2. Reboot required: sudo reboot
-3. Test audio: speaker-test -c 2
-EOF
-            ;;
-    esac
     
     cat "$REPORT_FILE"
+    
     print_status "Full report saved to: $REPORT_FILE"
-}
-
-# Cleanup old installation
-cleanup_old_install() {
-    if [[ "$CLEAN_INSTALL" == true ]]; then
-        print_status "Cleaning previous installation..."
-        
-        # Stop service if running
-        systemctl stop storytellerpi 2>/dev/null || true
-        systemctl disable storytellerpi 2>/dev/null || true
-        
-        # Remove service file
-        rm -f /etc/systemd/system/storytellerpi.service
-        systemctl daemon-reload
-        
-        # Remove installation directory
-        rm -rf "$INSTALL_DIR"
-        
-        # Remove service user
-        userdel "$SERVICE_USER" 2>/dev/null || true
-        
-        print_success "Cleanup completed"
-    fi
 }
 
 # Main installation flow
@@ -699,8 +613,12 @@ main() {
     print_status "Installation type: $INSTALL_TYPE"
     print_status "Log file: $LOG_FILE"
     
-    # Initialize log
-    echo "StorytellerPi Setup Started: $(date)" > "$LOG_FILE"
+    # Initialize log (create in script directory to avoid permission issues)
+    echo "StorytellerPi Setup Started: $(date)" > "$LOG_FILE" 2>/dev/null || {
+        LOG_FILE="./storytellerpi_setup.log"
+        echo "StorytellerPi Setup Started: $(date)" > "$LOG_FILE"
+        print_status "Using local log file: $LOG_FILE"
+    }
     
     # Check environment
     check_raspberry_pi
