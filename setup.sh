@@ -333,26 +333,17 @@ phase4_application_setup() {
     # Create directories
     mkdir -p "$INSTALL_DIR/logs"
     mkdir -p "$INSTALL_DIR/credentials"
+    mkdir -p "$INSTALL_DIR/temp"
     
-    # Copy configuration template
+    # Copy complete configuration file
     if [[ -f "$SCRIPT_DIR/.env" ]]; then
+        print_status "Copying complete .env configuration..."
         cp "$SCRIPT_DIR/.env" "$INSTALL_DIR/.env"
+        print_success "Complete .env configuration copied"
     else
-        # Create basic .env template
-        cat > "$INSTALL_DIR/.env" << 'EOF'
-# StorytellerPi Configuration
-# Copy this file and configure your API keys
-
-# Installation Settings
-INSTALL_DIR=/opt/storytellerpi
-LOG_DIR=/opt/storytellerpi/logs
-
-# API Keys (Required)
-GEMINI_API_KEY=your-gemini-api-key-here
-OPENAI_API_KEY=your-openai-api-key-here
-ELEVENLABS_API_KEY=your-elevenlabs-api-key-here
-PORCUPINE_ACCESS_KEY=your-porcupine-access-key-here
-EOF
+        print_error ".env file not found in $SCRIPT_DIR"
+        print_error "Please ensure the complete .env file is present before installation"
+        exit 1
     fi
     
     # Create credentials documentation
@@ -429,12 +420,11 @@ SyslogIdentifier=storytellerpi
 MemoryLimit=400M
 CPUQuota=80%
 
-# Security settings
+# Security settings (relaxed for Pi Zero 2W)
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=$INSTALL_DIR/logs $INSTALL_DIR/temp
+ProtectSystem=false
+ProtectHome=false
+ReadWritePaths=$INSTALL_DIR
 
 [Install]
 WantedBy=multi-user.target
@@ -470,11 +460,10 @@ SyslogIdentifier=storytellerpi-web
 MemoryLimit=200M
 CPUQuota=50%
 
-# Security settings
+# Security settings (relaxed for Pi Zero 2W)
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
+ProtectSystem=false
+ProtectHome=false
 ReadWritePaths=$INSTALL_DIR
 
 [Install]
