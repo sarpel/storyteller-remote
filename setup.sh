@@ -132,15 +132,30 @@ get_progress() {
     fi
 }
 
-# System validation
+# System validation and hardware detection
 check_raspberry_pi() {
     print_status "Checking if running on Raspberry Pi..."
     
     if [[ ! -f /proc/cpuinfo ]] || ! grep -q "Raspberry Pi" /proc/cpuinfo; then
         print_warning "Not running on Raspberry Pi - some features may not work"
+        PI_MODEL="Unknown"
+        AUDIO_HARDWARE="usb"
     else
         PI_MODEL=$(grep "Model" /proc/cpuinfo | cut -d: -f2 | xargs)
         print_success "Detected: $PI_MODEL"
+        
+        # Determine audio hardware based on Pi model
+        if [[ "$PI_MODEL" =~ "Pi 5" ]]; then
+            AUDIO_HARDWARE="usb"
+            print_status "Audio Hardware: Waveshare USB Audio Dongle (Pi 5 detected)"
+        elif [[ "$PI_MODEL" =~ "Pi Zero 2" ]]; then
+            AUDIO_HARDWARE="iqaudio"
+            print_status "Audio Hardware: IQaudio Codec Zero HAT (Pi Zero 2W detected)"
+        else
+            # Default to USB for other models
+            AUDIO_HARDWARE="usb"
+            print_status "Audio Hardware: USB Audio (default for $PI_MODEL)"
+        fi
     fi
     
     # Check if running as root
@@ -214,7 +229,7 @@ phase1_system_preparation() {
 
 # Phase 2: Audio setup
 phase2_audio_setup() {
-    print_header "Phase 2: Audio Setup"
+    print_header "Phase 2: Audio Setup ($AUDIO_HARDWARE)"
     
     if [[ "$INSTALL_TYPE" == "test-only" ]] || [[ "$INSTALL_TYPE" == "quick" ]]; then
         print_status "Skipping audio setup for $INSTALL_TYPE mode"
@@ -226,19 +241,36 @@ phase2_audio_setup() {
         return
     fi
     
-    print_status "Configuring IQaudIO Pi-Codec Zero HAT..."
+    if [[ "$AUDIO_HARDWARE" == "iqaudio" ]]; then
+        configure_iqaudio_codec()
+    elif [[ "$AUDIO_HARDWARE" == "usb" ]]; then
+        configure_usb_audio()
+    else
+        print_error "Unknown audio hardware: $AUDIO_HARDWARE"
+        exit 1
+    fi
+    
+    save_progress "phase2"
+    print_success "Phase 2 completed"
+}
+
+# Configure IQaudio Codec Zero for Pi Zero 2W
+configure_iqaudio_codec() {
+    print_status "Configuring IQaudio Pi-Codec Zero HAT..."
     
     # Enable I2S interface
     if ! grep -q "dtparam=i2s=on" /boot/config.txt; then
         echo "dtparam=i2s=on" >> /boot/config.txt
+        print_status "Enabled I2S interface"
     fi
     
-    # Add IQaudIO overlay
+    # Add IQaudio overlay
     if ! grep -q "dtoverlay=iqaudio-codec" /boot/config.txt; then
         echo "dtoverlay=iqaudio-codec" >> /boot/config.txt
+        print_status "Added IQaudio device tree overlay"
     fi
     
-    # Configure ALSA
+    # Configure ALSA for IQaudio (card 0)
     cat > /etc/asound.conf << 'EOF'
 pcm.!default {
     type hw
@@ -251,11 +283,85 @@ ctl.!default {
 }
 EOF
     
-    print_status "Testing audio configuration..."
-    # Test will be done later in validation phase
+    print_success "IQaudio Codec Zero configured"
+}
+
+# Configure USB Audio for Pi 5
+configure_usb_audio() {
+    print_status "Configuring Waveshare USB Audio Dongle..."
     
-    save_progress "phase2"
-    print_success "Phase 2 completed"
+    # Install USB audio drivers (should be built-in)
+    print_status "Ensuring USB audio support is available..."
+    
+    # Configure ALSA for USB audio (typically card 1)
+    # We'll use a more flexible configuration that finds the USB audio device
+    cat > /etc/asound.conf << 'EOF'
+# Find the USB audio device dynamically
+pcm.!default {
+    type pulse
+}
+ctl.!default {
+    type pulse
+}
+
+# Fallback to USB audio if PulseAudio is not available
+pcm.usb {
+    type hw
+    card 1
+    device 0
+}
+ctl.usb {
+    type hw
+    card 1
+}
+EOF
+    
+    # Install and configure PulseAudio for better USB audio handling
+    print_status "Installing PulseAudio for USB audio management..."
+    apt install -y pulseaudio pulseaudio-utils
+    
+    # Configure PulseAudio to run as system service
+    systemctl --global disable pulseaudio.service pulseaudio.socket
+    systemctl enable pulseaudio.service
+    
+    # Create PulseAudio configuration for the storyteller user
+    mkdir -p "/home/$SERVICE_USER/.config/pulse"
+    cat > "/home/$SERVICE_USER/.config/pulse/default.pa" << 'EOF'
+# Load audio drivers automatically
+.include /etc/pulse/default.pa
+
+# Set USB audio as default if available
+set-default-sink alsa_output.usb-*
+set-default-source alsa_input.usb-*
+EOF
+    
+    chown -R "$SERVICE_USER:$SERVICE_USER" "/home/$SERVICE_USER/.config"
+    
+    print_success "USB Audio (Waveshare) configured with PulseAudio"
+}
+
+# Configure audio device settings in .env based on hardware
+configure_audio_settings() {
+    print_status "Configuring audio device settings for $AUDIO_HARDWARE hardware..."
+    
+    if [[ "$AUDIO_HARDWARE" == "iqaudio" ]]; then
+        # IQaudio Codec Zero settings (Pi Zero 2W)
+        sed -i 's/^AUDIO_DEVICE_INDEX=.*/AUDIO_DEVICE_INDEX=0/' "$INSTALL_DIR/.env"
+        sed -i 's/^PLAYBACK_DEVICE_INDEX=.*/PLAYBACK_DEVICE_INDEX=0/' "$INSTALL_DIR/.env"
+        print_status "Configured for IQaudio Codec Zero (device index 0)"
+        
+    elif [[ "$AUDIO_HARDWARE" == "usb" ]]; then
+        # USB Audio settings (Pi 5)
+        sed -i 's/^AUDIO_DEVICE_INDEX=.*/AUDIO_DEVICE_INDEX=1/' "$INSTALL_DIR/.env"
+        sed -i 's/^PLAYBACK_DEVICE_INDEX=.*/PLAYBACK_DEVICE_INDEX=1/' "$INSTALL_DIR/.env"
+        print_status "Configured for USB Audio Dongle (device index 1)"
+    fi
+    
+    # Add hardware detection info to .env
+    echo "" >> "$INSTALL_DIR/.env"
+    echo "# Hardware Detection (auto-configured)" >> "$INSTALL_DIR/.env"
+    echo "DETECTED_PI_MODEL=\"$PI_MODEL\"" >> "$INSTALL_DIR/.env"
+    echo "DETECTED_AUDIO_HARDWARE=\"$AUDIO_HARDWARE\"" >> "$INSTALL_DIR/.env"
 }
 
 # Phase 3: Python environment setup
@@ -339,7 +445,11 @@ phase4_application_setup() {
     if [[ -f "$SCRIPT_DIR/.env" ]]; then
         print_status "Copying complete .env configuration..."
         cp "$SCRIPT_DIR/.env" "$INSTALL_DIR/.env"
-        print_success "Complete .env configuration copied"
+        
+        # Update audio device settings based on detected hardware
+        configure_audio_settings
+        
+        print_success "Complete .env configuration copied and customized"
     else
         print_error ".env file not found in $SCRIPT_DIR"
         print_error "Please ensure the complete .env file is present before installation"
@@ -513,7 +623,12 @@ phase6_testing() {
     
     # Test audio system
     if command -v aplay &> /dev/null; then
-        print_success "Audio system: OK"
+        print_success "Audio system: OK ($AUDIO_HARDWARE detected)"
+        
+        # Test specific audio hardware
+        if [[ "$AUDIO_HARDWARE" == "usb" ]] && command -v pulseaudio &> /dev/null; then
+            print_success "PulseAudio: OK (for USB audio)"
+        fi
     else
         print_warning "Audio system: NOT CONFIGURED"
     fi
