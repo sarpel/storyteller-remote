@@ -82,27 +82,43 @@ storyteller-remote/
 
 ## Configuration
 
-Edit `/opt/storytellerpi/.env` to configure:
+### API Keys Setup (Required)
 
-```bash
-# Essential API keys (required)
-PORCUPINE_ACCESS_KEY=your-porcupine-key
-GOOGLE_CLOUD_PROJECT=your-project-id
-OPENAI_API_KEY=your-openai-key
-ELEVENLABS_API_KEY=your-elevenlabs-key
+1. **Copy the example configuration:**
+   ```bash
+   cp .env.example .env
+   ```
 
-# Hardware button settings
-WAKE_WORD_BUTTON_ENABLED=true
-WAKE_WORD_BUTTON_PIN=18
+2. **Edit `.env` with your API keys:**
+   ```bash
+   # Essential API keys (required)
+   GEMINI_API_KEY=your-gemini-api-key           # Google Gemini for AI responses
+   PORCUPINE_ACCESS_KEY=your-porcupine-key      # Picovoice Porcupine for wake word
+   GOOGLE_CLOUD_PROJECT=your-project-id         # Google Cloud for STT/TTS
+   
+   # Optional API keys
+   OPENAI_API_KEY=your-openai-key               # Alternative to Gemini
+   ELEVENLABS_API_KEY=your-elevenlabs-key       # Premium TTS service
+   
+   # Hardware button settings
+   WAKE_WORD_BUTTON_ENABLED=true
+   WAKE_WORD_BUTTON_PIN=18
+   
+   # Audio settings
+   USB_AUDIO_ENABLED=true
+   AUDIO_SAMPLE_RATE=16000
+   
+   # Performance tuning
+   MAX_MEMORY_USAGE=300
+   LOG_LEVEL=WARNING
+   ```
 
-# Audio settings
-USB_AUDIO_ENABLED=true
-AUDIO_SAMPLE_RATE=16000
-
-# Performance tuning
-MAX_MEMORY_USAGE=300
-LOG_LEVEL=WARNING
-```
+3. **Get your API keys:**
+   - **Gemini API**: https://makersuite.google.com/app/apikey
+   - **Porcupine**: https://console.picovoice.ai/
+   - **Google Cloud**: https://console.cloud.google.com/apis/credentials
+   - **OpenAI**: https://platform.openai.com/api-keys
+   - **ElevenLabs**: https://elevenlabs.io/app/settings/api-keys
 
 ## Web Interface Features
 

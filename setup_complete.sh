@@ -720,6 +720,7 @@ AUDIO_CHUNK_SIZE=1024
 # AI Services (Add your API keys here)
 GOOGLE_CLOUD_PROJECT=your-project-id
 GOOGLE_APPLICATION_CREDENTIALS=$INSTALL_DIR/credentials/google-cloud-key.json
+GEMINI_API_KEY=your-gemini-api-key
 PORCUPINE_ACCESS_KEY=your-porcupine-key
 OPENAI_API_KEY=your-openai-key
 ELEVENLABS_API_KEY=your-elevenlabs-key
