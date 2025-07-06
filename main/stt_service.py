@@ -32,14 +32,22 @@ class STTService:
     Speech-to-Text service with multiple provider support
     """
     
-    def __init__(self, config: dict):
-        self.config = config
+    def __init__(self):
+        # Load environment variables
+        from dotenv import load_dotenv
+        load_dotenv()
+        
         self.logger = logging.getLogger(__name__)
         
-        # Audio configuration
-        self.sample_rate = config['audio']['sample_rate']
-        self.chunk_size = config['audio']['chunk_size']
-        self.channels = config['audio']['channels']
+        # Audio configuration from environment
+        self.sample_rate = int(os.getenv('STT_SAMPLE_RATE', '16000'))
+        self.chunk_size = int(os.getenv('AUDIO_CHUNK_SIZE', '1024'))
+        self.channels = int(os.getenv('AUDIO_CHANNELS', '1'))
+        
+        # STT configuration
+        self.language_code = os.getenv('STT_LANGUAGE_CODE', 'en-US')
+        self.timeout = float(os.getenv('STT_TIMEOUT', '30.0'))
+        self.max_audio_length = float(os.getenv('STT_MAX_AUDIO_LENGTH', '60.0'))
         
         # Initialize clients
         self.google_client = None
@@ -52,8 +60,8 @@ class STTService:
         try:
             # Initialize Google Cloud Speech client
             if GOOGLE_STT_AVAILABLE:
-                credentials_path = self.config['apis']['google']['credentials_path']
-                if os.path.exists(credentials_path):
+                credentials_path = os.getenv('GOOGLE_CREDENTIALS_JSON')
+                if credentials_path and os.path.exists(credentials_path):
                     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
                     self.google_client = speech.SpeechClient()
                     self.logger.info("Google Cloud Speech client initialized")
@@ -62,14 +70,12 @@ class STTService:
             
             # Initialize OpenAI client
             if OPENAI_AVAILABLE:
-                api_key_path = self.config['apis']['openai']['api_key_path']
-                if os.path.exists(api_key_path):
-                    with open(api_key_path, 'r') as f:
-                        api_key = f.read().strip()
+                api_key = os.getenv('OPENAI_API_KEY')
+                if api_key:
                     self.openai_client = openai.OpenAI(api_key=api_key)
                     self.logger.info("OpenAI client initialized")
                 else:
-                    self.logger.warning(f"OpenAI API key not found: {api_key_path}")
+                    self.logger.warning("OpenAI API key not found in environment")
                     
         except Exception as e:
             self.logger.error(f"Failed to initialize STT clients: {e}")
@@ -112,7 +118,7 @@ class STTService:
             config = speech.RecognitionConfig(
                 encoding=speech.RecognitionConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=self.sample_rate,
-                language_code=self.config['apis']['google']['language_code'],
+                language_code=self.language_code,
                 audio_channel_count=self.channels,
                 enable_automatic_punctuation=True,
             )
@@ -147,9 +153,9 @@ class STTService:
                 # Transcribe with Whisper
                 with open(temp_file.name, 'rb') as audio_file:
                     transcript = self.openai_client.audio.transcriptions.create(
-                        model=self.config['apis']['openai']['model'],
+                        model=os.getenv('STT_WHISPER_MODEL', 'whisper-1'),
                         file=audio_file,
-                        language='en'
+                        language=os.getenv('STT_WHISPER_LANGUAGE', 'en')
                     )
                 
                 # Clean up temp file
@@ -192,10 +198,11 @@ class STTService:
             
             # Find input device
             device_index = None
-            if self.config['audio']['input_device'] != "default":
+            input_device = os.getenv('AUDIO_INPUT_DEVICE', 'default')
+            if input_device != "default":
                 for i in range(audio.get_device_count()):
                     info = audio.get_device_info_by_index(i)
-                    if self.config['audio']['input_device'] in info['name']:
+                    if input_device in info['name']:
                         device_index = i
                         break
             

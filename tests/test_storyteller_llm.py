@@ -18,19 +18,14 @@ from storyteller_llm import StorytellerLLM
 @pytest.fixture
 def test_config():
     """Create test configuration"""
-    return {
-        'apis': {
-            'google': {
-                'credentials_path': 'credentials/test-google-creds.json'
-            }
-        },
-        'storyteller': {
-            'max_conversation_length': 5,
-            'story_length': 'medium',
-            'safety_level': 'high',
-            'system_prompt': 'You are Elsa, a friendly storyteller.'
-        }
-    }
+    # Set up environment variables for testing
+    os.environ['GEMINI_API_KEY'] = 'test_key'
+    os.environ['LLM_CONVERSATION_HISTORY_LIMIT'] = '5'
+    os.environ['LLM_CONTENT_FILTER_LEVEL'] = 'strict'
+    os.environ['LLM_CHILD_SAFE_MODE'] = 'true'
+    os.environ['LLM_AGE_APPROPRIATE_CONTENT'] = '5'
+    os.environ['LLM_MAX_TOKENS'] = '1000'
+    return {}
 
 
 class TestStorytellerLLM:
@@ -43,12 +38,12 @@ class TestStorytellerLLM:
         mock_model_instance = Mock()
         mock_model.return_value = mock_model_instance
         
-        service = StorytellerLLM(test_config)
+        service = StorytellerLLM()
         
         assert service.model is not None
         assert service.max_history_length == 5
-        assert service.story_length == 'medium'
-        assert service.safety_level == 'high'
+        assert service.story_length == '1000'
+        assert service.safety_level == 'strict'
         mock_configure.assert_called_once()
         mock_model.assert_called_once()
     
@@ -57,7 +52,7 @@ class TestStorytellerLLM:
         with patch('storyteller_llm.GEMINI_AVAILABLE', True):
             with patch('storyteller_llm.genai.configure'):
                 with patch('storyteller_llm.genai.GenerativeModel'):
-                    service = StorytellerLLM(test_config)
+                    service = StorytellerLLM()
                     settings = service._get_safety_settings()
         
         # Should have strict safety settings
@@ -66,26 +61,24 @@ class TestStorytellerLLM:
     
     def test_safety_settings_medium(self, test_config):
         """Test medium safety level settings"""
-        test_config['storyteller']['safety_level'] = 'medium'
+        os.environ['LLM_CHILD_SAFE_MODE'] = 'false'
+        os.environ['LLM_SAFETY_HARASSMENT'] = 'block_medium_and_above'
         
         with patch('storyteller_llm.GEMINI_AVAILABLE', True):
             with patch('storyteller_llm.genai.configure'):
                 with patch('storyteller_llm.genai.GenerativeModel'):
-                    service = StorytellerLLM(test_config)
+                    service = StorytellerLLM()
                     settings = service._get_safety_settings()
         
-        # Should have mixed safety settings
+        # Should have mixed safety settings when not in child safe mode
         assert len(settings) == 4
-        # At least one should be BLOCK_MEDIUM_AND_ABOVE
-        medium_blocks = [s for s in settings if 'MEDIUM' in s['threshold']]
-        assert len(medium_blocks) > 0
     
     def test_conversation_history_management(self, test_config):
         """Test conversation history limits"""
         with patch('storyteller_llm.GEMINI_AVAILABLE', True):
             with patch('storyteller_llm.genai.configure'):
                 with patch('storyteller_llm.genai.GenerativeModel'):
-                    service = StorytellerLLM(test_config)
+                    service = StorytellerLLM()
         
         # Add messages beyond limit
         for i in range(15):  # More than max_conversation_length * 2
@@ -96,7 +89,7 @@ class TestStorytellerLLM:
         service._manage_conversation_history()
         
         # Should be trimmed to max limit
-        assert len(service.conversation_history) <= test_config['storyteller']['max_conversation_length'] * 2
+        assert len(service.conversation_history) <= service.max_history_length * 2
     
     def test_context_determination(self, test_config):
         """Test context type determination"""

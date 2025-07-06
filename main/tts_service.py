@@ -24,19 +24,22 @@ class TTSService:
     Text-to-Speech service using ElevenLabs
     """
     
-    def __init__(self, config: dict):
-        self.config = config
+    def __init__(self):
+        # Load environment variables
+        from dotenv import load_dotenv
+        load_dotenv()
+        
         self.logger = logging.getLogger(__name__)
         
-        # TTS configuration
-        self.voice_id = config['apis']['elevenlabs']['voice_id']
-        self.model_id = config['apis']['elevenlabs']['model_id']
-        self.stability = config['apis']['elevenlabs']['stability']
-        self.similarity_boost = config['apis']['elevenlabs']['similarity_boost']
-        self.voice_speed = config['storyteller']['voice_speed']
+        # TTS configuration from environment
+        self.voice_id = os.getenv('ELEVENLABS_VOICE_ID', 'xsGHrtxT5AdDzYXTQT0d')
+        self.model_id = os.getenv('TTS_MODEL_ID', 'eleven_multilingual_v2')
+        self.stability = float(os.getenv('TTS_VOICE_STABILITY', '0.75'))
+        self.similarity_boost = float(os.getenv('TTS_VOICE_SIMILARITY_BOOST', '0.75'))
+        self.voice_speed = float(os.getenv('TTS_VOICE_SPEED', '1.0'))
         
         # Audio playback
-        self.audio_output_device = config['audio']['output_device']
+        self.audio_output_device = os.getenv('AUDIO_OUTPUT_DEVICE', 'default')
         
         # Initialize services
         self._initialize_elevenlabs()
@@ -48,15 +51,13 @@ class TTSService:
             if not ELEVENLABS_AVAILABLE:
                 raise ImportError("ElevenLabs library not available")
             
-            # Load API key
-            api_key_path = self.config['apis']['elevenlabs']['api_key_path']
-            if os.path.exists(api_key_path):
-                with open(api_key_path, 'r') as f:
-                    api_key = f.read().strip()
+            # Load API key from environment
+            api_key = os.getenv('ELEVENLABS_API_KEY')
+            if api_key:
                 set_api_key(api_key)
                 self.logger.info("ElevenLabs API key configured")
             else:
-                raise FileNotFoundError(f"ElevenLabs API key not found: {api_key_path}")
+                raise ValueError("ELEVENLABS_API_KEY not found in environment variables")
                 
         except Exception as e:
             self.logger.error(f"Failed to initialize ElevenLabs: {e}")

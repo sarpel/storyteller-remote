@@ -85,8 +85,9 @@ class StorytellerMonitor:
     def check_service_status(self):
         """Check StorytellerPi service status"""
         try:
+            service_name = os.getenv('SERVICE_NAME', 'storytellerpi')
             result = subprocess.run(
-                ['systemctl', 'is-active', 'storyteller.service'],
+                ['systemctl', 'is-active', f'{service_name}.service'],
                 capture_output=True,
                 text=True
             )
@@ -97,8 +98,9 @@ class StorytellerMonitor:
     def get_service_logs(self, lines: int = 10):
         """Get recent service logs"""
         try:
+            service_name = os.getenv('SERVICE_NAME', 'storytellerpi')
             result = subprocess.run(
-                ['journalctl', '-u', 'storyteller.service', '-n', str(lines), '--no-pager'],
+                ['journalctl', '-u', f'{service_name}.service', '-n', str(lines), '--no-pager'],
                 capture_output=True,
                 text=True
             )
@@ -187,7 +189,8 @@ class StorytellerMonitor:
     def restart_service(self):
         """Restart the StorytellerPi service"""
         try:
-            subprocess.run(['sudo', 'systemctl', 'restart', 'storyteller.service'], check=True)
+            service_name = os.getenv('SERVICE_NAME', 'storytellerpi')
+            subprocess.run(['sudo', 'systemctl', 'restart', f'{service_name}.service'], check=True)
             self.logger.info("StorytellerPi service restarted")
             return True
         except subprocess.CalledProcessError as e:

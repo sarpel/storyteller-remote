@@ -29,7 +29,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 INSTALL_DIR = os.getenv('INSTALL_DIR', '/opt/storytellerpi')
 ENV_FILE = os.path.join(INSTALL_DIR, '.env')
 LOG_DIR = os.getenv('LOG_DIR', '/opt/storytellerpi/logs')
-SERVICE_NAME = 'storytellerpi'
+SERVICE_NAME = os.getenv('SERVICE_NAME', 'storytellerpi')
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

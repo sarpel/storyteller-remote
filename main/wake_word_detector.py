@@ -76,7 +76,7 @@ class WakeWordDetector:
     def _initialize_model(self):
         """Initialize the wake word model based on framework"""
         try:
-            if self.framework == "onnx" and OPENWAKEWORD_AVAILABLE:
+            if self.framework == "openwakeword" and OPENWAKEWORD_AVAILABLE:
                 self._initialize_openwakeword()
             elif self.framework == "porcupine" and PORCUPINE_AVAILABLE:
                 self._initialize_porcupine()
@@ -131,10 +131,11 @@ class WakeWordDetector:
         
         # Find input device
         device_index = None
-        if self.config['audio']['input_device'] != "default":
+        input_device = os.getenv('AUDIO_INPUT_DEVICE', 'default')
+        if input_device != "default":
             for i in range(self.audio.get_device_count()):
                 info = self.audio.get_device_info_by_index(i)
-                if self.config['audio']['input_device'] in info['name']:
+                if input_device in info['name']:
                     device_index = i
                     break        
         try:
@@ -183,7 +184,7 @@ class WakeWordDetector:
                 audio_array = np.frombuffer(audio_data, dtype=np.int16)
                 
                 # Process based on framework
-                if self.framework == "onnx":
+                if self.framework == "openwakeword":
                     self._process_openwakeword(audio_array)
                 elif self.framework == "porcupine":
                     self._process_porcupine(audio_array)

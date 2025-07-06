@@ -13,26 +13,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'main'))
 
 def test_config_loading():
     """Test configuration file loading"""
-    config_path = Path(__file__).parent.parent / 'config' / 'config.yaml'
+    from dotenv import load_dotenv
+    import os
     
-    assert config_path.exists(), "Configuration file should exist"
+    # Load .env file
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
     
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
+    # Check required environment variables
+    required_vars = [
+        'AUDIO_SAMPLE_RATE',
+        'AUDIO_CHUNK_SIZE', 
+        'WAKE_WORD_MODEL_PATH',
+        'WAKE_WORD_THRESHOLD'
+    ]
     
-    # Check required sections
-    assert 'audio' in config
-    assert 'wake_word' in config
-    assert 'apis' in config
-    assert 'storyteller' in config
-    
-    # Check required audio settings
-    assert 'sample_rate' in config['audio']
-    assert 'chunk_size' in config['audio']
-    
-    # Check wake word settings
-    assert 'model_path' in config['wake_word']
-    assert 'threshold' in config['wake_word']
+    for var in required_vars:
+        assert os.getenv(var) is not None, f"Environment variable {var} should be set"
 
 def test_model_files_exist():
     """Test that wake word model files exist"""
@@ -51,16 +49,22 @@ def test_directory_structure():
     
     required_dirs = [
         'main',
-        'config', 
         'credentials',
         'models',
-        'scripts',
-        'logs'
+        'scripts'
     ]
+    
+    # Optional directories (created at runtime)
+    optional_dirs = ['logs']
     
     for dir_name in required_dirs:
         dir_path = base_dir / dir_name
         assert dir_path.exists(), f"Directory {dir_name} should exist"
+    
+    for dir_name in optional_dirs:
+        dir_path = base_dir / dir_name
+        if not dir_path.exists():
+            print(f"Optional directory {dir_name} does not exist (will be created at runtime)")
 
 def test_main_modules_exist():
     """Test that main application modules exist"""
