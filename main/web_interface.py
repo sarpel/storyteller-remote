@@ -75,62 +75,252 @@ class ConfigManager:
 
 
 class ServiceManager:
-    """Manages StorytellerPi service"""
+    """Manages StorytellerPi service with robust error handling"""
+    
+    @staticmethod
+    def _find_systemctl() -> str:
+        """Find systemctl binary"""
+        possible_paths = [
+            '/usr/bin/systemctl',
+            '/bin/systemctl',
+            '/usr/local/bin/systemctl',
+            'systemctl'  # Fallback to PATH
+        ]
+        
+        for path in possible_paths:
+            try:
+                result = subprocess.run([path, '--version'], 
+                                      capture_output=True, timeout=5)
+                if result.returncode == 0:
+                    return path
+            except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+                continue
+        
+        return None
+    
+    @staticmethod
+    def _run_systemctl_command(command: str) -> tuple[bool, str]:
+        """Run systemctl command with error handling"""
+        systemctl_path = ServiceManager._find_systemctl()
+        
+        if not systemctl_path:
+            logger.error("systemctl not found in system")
+            return False, "systemctl not available"
+        
+        try:
+            full_command = [systemctl_path] + command.split()
+            logger.info(f"Running command: {' '.join(full_command)}")
+            
+            result = subprocess.run(
+                full_command,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=dict(os.environ, PATH='/usr/bin:/bin:/usr/local/bin:/sbin:/usr/sbin')
+            )
+            
+            return result.returncode == 0, result.stdout.strip() or result.stderr.strip()
+            
+        except subprocess.TimeoutExpired:
+            logger.error(f"Command timed out: {command}")
+            return False, "Command timed out"
+        except Exception as e:
+            logger.error(f"Command failed: {command}, error: {e}")
+            return False, str(e)
     
     @staticmethod
     def get_service_status() -> Dict[str, Any]:
-        """Get service status"""
+        """Get service status with comprehensive error handling"""
         try:
-            result = subprocess.run(
-                ['systemctl', 'is-active', SERVICE_NAME],
-                capture_output=True, text=True
-            )
-            is_active = result.stdout.strip() == 'active'
+            # Check if service exists first
+            service_exists, _ = ServiceManager._run_systemctl_command(f"status {SERVICE_NAME}")
             
-            result = subprocess.run(
-                ['systemctl', 'is-enabled', SERVICE_NAME],
-                capture_output=True, text=True
-            )
-            is_enabled = result.stdout.strip() == 'enabled'
+            if not service_exists:
+                # Check if we're running the process directly
+                return ServiceManager._get_process_status()
+            
+            # Get service active status
+            is_active, active_output = ServiceManager._run_systemctl_command(f"is-active {SERVICE_NAME}")
+            
+            # Get service enabled status
+            is_enabled, enabled_output = ServiceManager._run_systemctl_command(f"is-enabled {SERVICE_NAME}")
+            
+            status = 'running' if is_active else 'stopped'
             
             return {
                 'active': is_active,
                 'enabled': is_enabled,
-                'status': 'running' if is_active else 'stopped'
+                'status': status,
+                'service_exists': True,
+                'method': 'systemd',
+                'details': f"Active: {active_output}, Enabled: {enabled_output}"
             }
+            
         except Exception as e:
             logger.error(f"Failed to get service status: {e}")
-            return {'active': False, 'enabled': False, 'status': 'unknown'}
+            # Fallback to process-based status
+            return ServiceManager._get_process_status()
     
     @staticmethod
-    def start_service() -> bool:
-        """Start the service"""
+    def _get_process_status() -> Dict[str, Any]:
+        """Get status by checking running processes"""
         try:
-            subprocess.run(['sudo', 'systemctl', 'start', SERVICE_NAME], check=True)
-            return True
+            # Look for StorytellerPi process
+            storyteller_running = False
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'storyteller_main.py' in cmdline or 'storytellerpi' in proc.info['name']:
+                        storyteller_running = True
+                        break
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            return {
+                'active': storyteller_running,
+                'enabled': False,  # Can't determine without systemd
+                'status': 'running' if storyteller_running else 'stopped',
+                'service_exists': False,
+                'method': 'process',
+                'details': 'Checked running processes'
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to check process status: {e}")
+            return {
+                'active': False,
+                'enabled': False,
+                'status': 'unknown',
+                'service_exists': False,
+                'method': 'error',
+                'details': str(e)
+            }
+    @staticmethod
+    def start_service() -> tuple[bool, str]:
+        """Start the service with comprehensive error handling"""
+        try:
+            # First check if service exists
+            status_info = ServiceManager.get_service_status()
+            
+            if status_info.get('method') == 'systemd':
+                # Use systemd
+                success, output = ServiceManager._run_systemctl_command(f"start {SERVICE_NAME}")
+                if success:
+                    return True, "Service started successfully"
+                else:
+                    # Try with sudo
+                    try:
+                        subprocess.run(['sudo', 'systemctl', 'start', SERVICE_NAME], 
+                                     check=True, capture_output=True, text=True, timeout=30)
+                        return True, "Service started with sudo"
+                    except Exception as e:
+                        return False, f"Failed to start service: {output}, sudo attempt: {e}"
+            else:
+                # Try to start manually
+                return ServiceManager._start_manual()
+                
         except Exception as e:
             logger.error(f"Failed to start service: {e}")
-            return False
+            return False, str(e)
     
     @staticmethod
-    def stop_service() -> bool:
-        """Stop the service"""
+    def stop_service() -> tuple[bool, str]:
+        """Stop the service with comprehensive error handling"""
         try:
-            subprocess.run(['sudo', 'systemctl', 'stop', SERVICE_NAME], check=True)
-            return True
+            status_info = ServiceManager.get_service_status()
+            
+            if status_info.get('method') == 'systemd':
+                # Use systemd
+                success, output = ServiceManager._run_systemctl_command(f"stop {SERVICE_NAME}")
+                if success:
+                    return True, "Service stopped successfully"
+                else:
+                    # Try with sudo
+                    try:
+                        subprocess.run(['sudo', 'systemctl', 'stop', SERVICE_NAME], 
+                                     check=True, capture_output=True, text=True, timeout=30)
+                        return True, "Service stopped with sudo"
+                    except Exception as e:
+                        return False, f"Failed to stop service: {output}, sudo attempt: {e}"
+            else:
+                # Try to stop manually
+                return ServiceManager._stop_manual()
+                
         except Exception as e:
             logger.error(f"Failed to stop service: {e}")
-            return False
+            return False, str(e)
     
     @staticmethod
-    def restart_service() -> bool:
-        """Restart the service"""
+    def restart_service() -> tuple[bool, str]:
+        """Restart the service with comprehensive error handling"""
         try:
-            subprocess.run(['sudo', 'systemctl', 'restart', SERVICE_NAME], check=True)
-            return True
+            # Stop first, then start
+            stop_success, stop_msg = ServiceManager.stop_service()
+            if not stop_success:
+                return False, f"Failed to stop service: {stop_msg}"
+            
+            # Wait a moment
+            import time
+            time.sleep(2)
+            
+            start_success, start_msg = ServiceManager.start_service()
+            if start_success:
+                return True, "Service restarted successfully"
+            else:
+                return False, f"Failed to start after stop: {start_msg}"
+                
         except Exception as e:
             logger.error(f"Failed to restart service: {e}")
-            return False
+            return False, str(e)
+    
+    @staticmethod
+    def _start_manual() -> tuple[bool, str]:
+        """Start service manually when systemd is not available"""
+        try:
+            # Check if already running
+            status = ServiceManager._get_process_status()
+            if status['active']:
+                return True, "Service already running"
+            
+            # Try to start the main script
+            install_dir = os.getenv('INSTALL_DIR', '/opt/storytellerpi')
+            main_script = os.path.join(install_dir, 'main', 'storyteller_main.py')
+            
+            if not os.path.exists(main_script):
+                return False, f"Main script not found: {main_script}"
+            
+            # Start in background
+            subprocess.Popen([
+                'python3', main_script
+            ], cwd=install_dir, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+            return True, "Service started manually"
+            
+        except Exception as e:
+            return False, f"Manual start failed: {e}"
+    
+    @staticmethod
+    def _stop_manual() -> tuple[bool, str]:
+        """Stop service manually when systemd is not available"""
+        try:
+            # Find and terminate StorytellerPi processes
+            killed_processes = 0
+            for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+                try:
+                    cmdline = ' '.join(proc.info['cmdline'] or [])
+                    if 'storyteller_main.py' in cmdline or 'storytellerpi' in proc.info['name']:
+                        proc.terminate()
+                        killed_processes += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+            
+            if killed_processes > 0:
+                return True, f"Stopped {killed_processes} process(es)"
+            else:
+                return True, "No running processes found"
+                
+        except Exception as e:
+            return False, f"Manual stop failed: {e}"
 
 
 class SystemMonitor:
@@ -182,24 +372,76 @@ class SystemMonitor:
             return []
 
 
-# Initialize managers
-config_manager = ConfigManager(ENV_FILE)
-service_manager = ServiceManager()
-system_monitor = SystemMonitor()
+# Initialize managers with error handling
+try:
+    config_manager = ConfigManager(ENV_FILE)
+    service_manager = ServiceManager()
+    system_monitor = SystemMonitor()
+    logger.info("Web interface managers initialized successfully")
+except Exception as e:
+    logger.error(f"Failed to initialize managers: {e}")
+    # Create minimal fallback managers
+    config_manager = None
+    service_manager = None
+    system_monitor = None
+
+
+def safe_get_service_status():
+    """Safely get service status with fallback"""
+    if service_manager:
+        try:
+            return service_manager.get_service_status()
+        except Exception as e:
+            logger.error(f"Error getting service status: {e}")
+    
+    return {
+        'active': False,
+        'enabled': False,
+        'status': 'unknown',
+        'service_exists': False,
+        'method': 'error',
+        'details': 'Service manager not available'
+    }
+
+
+def safe_get_system_info():
+    """Safely get system info with fallback"""
+    if system_monitor:
+        try:
+            return system_monitor.get_system_info()
+        except Exception as e:
+            logger.error(f"Error getting system info: {e}")
+    
+    return {
+        'cpu_percent': 0,
+        'memory_percent': 0,
+        'disk_percent': 0,
+        'temperature': None,
+        'uptime': 'Unknown',
+        'hostname': 'Unknown'
+    }
 
 
 # Routes
 @app.route('/')
 def dashboard():
-    """Main dashboard page"""
-    service_status = service_manager.get_service_status()
-    system_info = system_monitor.get_system_info()
-    recent_logs = system_monitor.get_recent_logs(10)
-    
-    return render_template('dashboard.html',
-                         service_status=service_status,
-                         system_info=system_info,
-                         recent_logs=recent_logs)
+    """Main dashboard page with error handling"""
+    try:
+        service_status = safe_get_service_status()
+        system_info = safe_get_system_info()
+        recent_logs = system_monitor.get_recent_logs(10) if system_monitor else []
+        
+        return render_template('dashboard.html',
+                             service_status=service_status,
+                             system_info=system_info,
+                             recent_logs=recent_logs)
+    except Exception as e:
+        logger.error(f"Dashboard error: {e}")
+        # Return minimal dashboard
+        return render_template('dashboard.html',
+                             service_status={'status': 'error', 'details': str(e)},
+                             system_info={'cpu_percent': 0, 'memory_percent': 0},
+                             recent_logs=[])
 
 
 @app.route('/settings')
@@ -212,23 +454,50 @@ def settings():
 # API Routes
 @app.route('/api/service/<action>', methods=['POST'])
 def service_control(action):
-    """Control service (start/stop/restart)"""
-    success = False
-    message = ""
-    
-    if action == 'start':
-        success = service_manager.start_service()
-        message = "Service started successfully" if success else "Failed to start service"
-    elif action == 'stop':
-        success = service_manager.stop_service()
-        message = "Service stopped successfully" if success else "Failed to stop service"
-    elif action == 'restart':
-        success = service_manager.restart_service()
-        message = "Service restarted successfully" if success else "Failed to restart service"
-    else:
-        message = "Invalid action"
-    
-    return jsonify({'success': success, 'message': message})
+    """Control service (start/stop/restart) with enhanced error handling"""
+    try:
+        # Check if service manager is available
+        if not service_manager:
+            return jsonify({
+                'success': False,
+                'message': 'Service manager not available - system may not be properly configured',
+                'status': {'active': False, 'status': 'unavailable'}
+            }), 503
+        
+        if action == 'start':
+            success, message = service_manager.start_service()
+        elif action == 'stop':
+            success, message = service_manager.stop_service()
+        elif action == 'restart':
+            success, message = service_manager.restart_service()
+        elif action == 'status':
+            # Return current status
+            status = safe_get_service_status()
+            return jsonify({
+                'success': True, 
+                'message': 'Status retrieved',
+                'status': status
+            })
+        else:
+            success = False
+            message = f"Invalid action: {action}. Valid actions: start, stop, restart, status"
+        
+        # Also include current status in response
+        current_status = safe_get_service_status()
+        
+        return jsonify({
+            'success': success, 
+            'message': message,
+            'status': current_status
+        })
+        
+    except Exception as e:
+        logger.error(f"Service control error for action '{action}': {e}")
+        return jsonify({
+            'success': False, 
+            'message': f"Internal error: {str(e)}",
+            'status': {'active': False, 'status': 'error'}
+        }), 500
 
 
 @app.route('/api/config', methods=['GET', 'POST'])
@@ -257,11 +526,18 @@ def config_api():
 
 @app.route('/api/system/status')
 def system_status():
-    """Get system status"""
-    return jsonify({
-        'service': service_manager.get_service_status(),
-        'system': system_monitor.get_system_info()
-    })
+    """Get system status with error handling"""
+    try:
+        return jsonify({
+            'service': safe_get_service_status(),
+            'system': safe_get_system_info()
+        })
+    except Exception as e:
+        logger.error(f"System status error: {e}")
+        return jsonify({
+            'service': {'status': 'error', 'details': str(e)},
+            'system': {'cpu_percent': 0, 'memory_percent': 0, 'error': str(e)}
+        }), 500
 
 
 @app.route('/api/logs')

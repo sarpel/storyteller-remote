@@ -1,39 +1,102 @@
-# StorytellerPi Dependencies - Production Ready
-# Core Web Framework
-flask==2.3.3
-flask-socketio==5.3.4
+# StorytellerPi - Complete Dependencies List
+# All required packages for the storytelling system
 
-# Google Cloud Services
-google-cloud-speech==2.21.0
-google-cloud-texttospeech==2.14.1
-google-generativeai==0.3.0
-
-# AI/ML Services
-openai==1.3.0
-elevenlabs==0.2.24
-
-# Wake Word Detection
-pvporcupine==3.0.0
-openwakeword==0.5.1
+# Core Framework
+flask>=2.0.0
+flask-socketio>=5.0.0
+python-dotenv>=0.19.0
+python-dateutil>=2.8.0
 
 # Audio Processing
-pyaudio==0.2.11
-pygame==2.5.2
-numpy==1.24.3
-scipy==1.10.1
-librosa==0.10.1
-soundfile==0.12.1
-webrtcvad==2.0.10
-pydub==0.25.1
+pyaudio>=0.2.11
+numpy>=1.21.0
+scipy>=1.7.0
+pygame>=2.0.0
+librosa>=0.9.0
+webrtcvad>=2.0.0
+soundfile>=0.10.0
 
-# System Utilities
-python-dotenv==1.0.0
-psutil==5.9.5
-requests==2.31.0
+# AI/ML Services
+openai>=1.0.0
+google-generativeai>=0.3.0
+google-cloud-speech>=2.21.0
+google-auth>=2.0.0
+elevenlabs>=0.2.0
 
-# NOTE: The following are built-in Python modules and should NOT be installed:
-# asyncio, threading, logging, pathlib, enum34, signal, gc, time, os, sys
-# json, subprocess, re, collections, functools, typing, dataclasses
-# contextlib, tempfile, shutil, socket, urllib, wave, multiprocessing
-# queue, pickle, base64, hashlib, hmac, secrets, uuid, datetime, calendar
-# locale, gettext, unicodedata
+# Wake Word Detection
+openwakeword>=0.5.0
+
+# Speech Recognition/Synthesis
+pyttsx3>=2.90
+SpeechRecognition>=3.10.0
+
+# HTTP/Network
+requests>=2.25.0
+aiohttp>=3.8.0
+urllib3>=1.26.0
+
+# Async Support
+asyncio-mqtt>=0.11.0
+aiofiles>=0.8.0
+
+# System Integration
+psutil>=5.8.0
+systemd-python>=234
+dbus-python>=1.2.0
+
+# Data Processing
+pandas>=1.3.0
+pillow>=8.3.0
+python-multipart>=0.0.5
+
+# Configuration/Logging
+pyyaml>=6.0
+colorlog>=6.0.0
+python-json-logger>=2.0.0
+
+# Security
+cryptography>=36.0.0
+passlib>=1.7.0
+
+# Development/Testing
+pytest>=7.0.0
+pytest-asyncio>=0.20.0
+pytest-cov>=4.0.0
+black>=22.0.0
+flake8>=4.0.0
+mypy>=0.991
+
+# Optional Dependencies
+# Uncomment if needed
+
+# TensorFlow (for advanced ML models)
+# tensorflow>=2.10.0
+
+# PyTorch (alternative ML framework)
+# torch>=1.13.0
+# torchaudio>=0.13.0
+
+# OpenCV (for computer vision)
+# opencv-python>=4.5.0
+
+# Additional audio formats
+# pydub>=0.25.0
+# mutagen>=1.45.0
+
+# Database support
+# sqlalchemy>=1.4.0
+# sqlite3  # Built-in
+
+# Additional web features
+# gunicorn>=20.1.0
+# celery>=5.2.0
+# redis>=4.0.0
+
+# Monitoring
+# prometheus-client>=0.15.0
+# grafana-api>=1.0.0
+
+# Cloud storage
+# boto3>=1.26.0  # AWS
+# azure-storage-blob>=12.0.0  # Azure
+# google-cloud-storage>=2.0.0  # Google Cloud

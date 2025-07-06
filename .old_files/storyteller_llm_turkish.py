@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-StorytellerLLM Service - Türkçe Hikaye Anlatma Servisi
-5 yaşındaki çocuklar için özel olarak tasarlanmış hikaye üretim sistemi
+Turkish StorytellerLLM Service
+Optimized for 5-year-old girl with remote OpenAI GPT-4 processing
+No local models - everything via API
 """
 
 import os
@@ -10,7 +11,7 @@ import json
 import asyncio
 import logging
 import random
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
 
@@ -20,40 +21,31 @@ sys.path.append(str(Path(__file__).parent))
 try:
     import openai
     from openai import OpenAI
-    OPENAI_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
     openai = None
     OpenAI = None
 
-try:
-    import google.generativeai as genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
-    genai = None
-
-class StorytellerLLM:
-    """Türkçe hikaye anlatma servisi"""
+class TurkishStorytellerLLM:
+    """Turkish storyteller LLM service optimized for 5-year-old girl"""
     
     def __init__(self, config: Optional[Dict] = None):
         self.config = config or {}
         self.logger = logging.getLogger(__name__)
-        self.openai_client = None
-        self.gemini_model = None
+        self.client = None
         self.is_initialized = False
         self.story_history = []
         self.current_session = None
         
-        # Çocuk konfigürasyonu
+        # Turkish storytelling configuration
         self.child_config = {
             'name': os.getenv('CHILD_NAME', 'Küçük Prenses'),
             'age': int(os.getenv('CHILD_AGE', '5')),
             'gender': os.getenv('CHILD_GENDER', 'kız'),
-            'language': 'turkish'
+            'language': os.getenv('STORY_LANGUAGE', 'turkish'),
+            'target_audience': os.getenv('STORY_TARGET_AUDIENCE', '5_year_old_girl')
         }
         
-        # Hikaye konfigürasyonu
+        # Story configuration
         self.story_config = {
             'themes': os.getenv('STORY_THEMES', 'prenses,peri,dostluk,macera,hayvanlar').split(','),
             'length': os.getenv('STORY_LENGTH', 'short'),
@@ -63,9 +55,9 @@ class StorytellerLLM:
             'content_filter': os.getenv('STORY_CONTENT_FILTER', 'very_strict')
         }
         
-        # LLM konfigürasyonu
-        self.llm_config = {
-            'service': os.getenv('LLM_SERVICE', 'openai'),
+        # OpenAI configuration
+        self.openai_config = {
+            'api_key': os.getenv('OPENAI_API_KEY'),
             'model': os.getenv('LLM_MODEL', 'gpt-4'),
             'temperature': float(os.getenv('LLM_TEMPERATURE', '0.8')),
             'max_tokens': int(os.getenv('LLM_MAX_TOKENS', '800')),
@@ -74,15 +66,14 @@ class StorytellerLLM:
             'presence_penalty': float(os.getenv('LLM_PRESENCE_PENALTY', '0.1'))
         }
         
-        # API konfigürasyonu
-        self.api_config = {
-            'openai_api_key': os.getenv('OPENAI_API_KEY'),
-            'gemini_api_key': os.getenv('GEMINI_API_KEY'),
-            'timeout': 30.0
-        }
+        # Turkish system prompts
+        self.system_prompts = self._load_turkish_prompts()
         
-        # Türkçe sistem promptları
-        self.system_prompts = {
+        self.logger.info(f"Turkish StorytellerLLM initialized for {self.child_config['name']}")
+    
+    def _load_turkish_prompts(self) -> Dict[str, Any]:
+        """Load Turkish storytelling prompts"""
+        return {
             'main_system_prompt': '''Sen 5 yaşındaki sevimli bir kız çocuğu için hikaye anlatan özel asistansın. 
             Adın "Hikaye Asistanı" ve sen her zaman nazik, sevecen ve eğlenceli hikayeleri anlatırsın.
             
@@ -154,96 +145,51 @@ class StorytellerLLM:
                 'doğa': "Güzel doğa, çiçekler ve rengarenk bahçeler hakkında"
             }
         }
-        
-        self.logger.info(f"StorytellerLLM başlatıldı - Çocuk: {self.child_config['name']}")
     
     async def initialize(self) -> bool:
-        """Hikaye servisi başlatma"""
+        """Initialize the Turkish storyteller LLM service"""
         try:
-            self.logger.info("StorytellerLLM servisi başlatılıyor...")
+            self.logger.info("Turkish StorytellerLLM servisi başlatılıyor...")
             
-            # Servis seçimine göre başlatma
-            if self.llm_config['service'] == 'openai':
-                success = await self._initialize_openai()
-            elif self.llm_config['service'] == 'gemini':
-                success = await self._initialize_gemini()
-            else:
-                # OpenAI'yi dene, başarısız olursa Gemini'ye geç
-                success = await self._initialize_openai()
-                if not success:
-                    success = await self._initialize_gemini()
-            
-            if success:
-                self.is_initialized = True
-                self.logger.info("✅ StorytellerLLM servisi başarıyla başlatıldı!")
-                self.logger.info(f"🎭 Konfigürasyon: {self.child_config['name']}, {self.child_config['age']} yaş, {self.child_config['gender']}")
-                self.logger.info(f"📚 Hikaye temaları: {', '.join(self.story_config['themes'])}")
-                
-            return success
-            
-        except Exception as e:
-            self.logger.error(f"StorytellerLLM başlatma hatası: {e}")
-            return False
-    
-    async def _initialize_openai(self) -> bool:
-        """OpenAI client başlatma"""
-        try:
-            if not OPENAI_AVAILABLE:
+            # Check if OpenAI is available
+            if not openai or not OpenAI:
                 self.logger.error("OpenAI kütüphanesi yüklü değil!")
                 return False
             
-            if not self.api_config['openai_api_key'] or self.api_config['openai_api_key'] == 'YOUR_OPENAI_API_KEY':
+            # Check API key
+            if not self.openai_config['api_key'] or self.openai_config['api_key'] == 'YOUR_OPENAI_API_KEY':
                 self.logger.error("OpenAI API anahtarı bulunamadı!")
+                self.logger.error("Lütfen .env dosyasında OPENAI_API_KEY değerini ayarlayın")
                 return False
             
-            self.openai_client = OpenAI(api_key=self.api_config['openai_api_key'])
+            # Initialize OpenAI client
+            self.client = OpenAI(api_key=self.openai_config['api_key'])
             
-            # Bağlantı testi
-            await self._test_openai_connection()
+            # Test connection
+            await self._test_connection()
             
-            self.llm_config['active_service'] = 'openai'
-            self.logger.info("✅ OpenAI başarıyla başlatıldı!")
+            self.is_initialized = True
+            self.logger.info("✅ Turkish StorytellerLLM servisi başarıyla başlatıldı!")
+            self.logger.info(f"🎭 Konfigürasyon: {self.child_config['name']}, {self.child_config['age']} yaş, {self.child_config['gender']}")
+            self.logger.info(f"📚 Hikaye temaları: {', '.join(self.story_config['themes'])}")
+            
             return True
             
         except Exception as e:
-            self.logger.error(f"OpenAI başlatma hatası: {e}")
+            self.logger.error(f"Turkish StorytellerLLM başlatma hatası: {e}")
             return False
     
-    async def _initialize_gemini(self) -> bool:
-        """Gemini client başlatma"""
+    async def _test_connection(self) -> bool:
+        """Test OpenAI API connection"""
         try:
-            if not GEMINI_AVAILABLE:
-                self.logger.error("Gemini kütüphanesi yüklü değil!")
-                return False
-            
-            if not self.api_config['gemini_api_key'] or self.api_config['gemini_api_key'] == 'YOUR_GEMINI_API_KEY':
-                self.logger.error("Gemini API anahtarı bulunamadı!")
-                return False
-            
-            genai.configure(api_key=self.api_config['gemini_api_key'])
-            self.gemini_model = genai.GenerativeModel(self.llm_config['model'])
-            
-            # Bağlantı testi
-            await self._test_gemini_connection()
-            
-            self.llm_config['active_service'] = 'gemini'
-            self.logger.info("✅ Gemini başarıyla başlatıldı!")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Gemini başlatma hatası: {e}")
-            return False
-    
-    async def _test_openai_connection(self) -> bool:
-        """OpenAI API bağlantı testi"""
-        try:
+            # Simple test completion
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
-                lambda: self.openai_client.chat.completions.create(
-                    model=self.llm_config['model'],
+                lambda: self.client.chat.completions.create(
+                    model=self.openai_config['model'],
                     messages=[
-                        {"role": "system", "content": "Sen hikaye anlatan bir asistansın."},
-                        {"role": "user", "content": "Test mesajı"}
+                        {"role": "system", "content": "Sen Türkçe hikaye anlatan bir asistansın."},
+                        {"role": "user", "content": "Merhaba, test mesajı"}
                     ],
                     max_tokens=50,
                     temperature=0.7
@@ -257,44 +203,29 @@ class StorytellerLLM:
             self.logger.error(f"OpenAI API bağlantı testi başarısız: {e}")
             raise
     
-    async def _test_gemini_connection(self) -> bool:
-        """Gemini API bağlantı testi"""
-        try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.gemini_model.generate_content("Test mesajı")
-            )
-            
-            self.logger.info("✅ Gemini API bağlantısı başarılı!")
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"Gemini API bağlantı testi başarısız: {e}")
-            raise
-    
     def get_random_greeting(self) -> str:
-        """Rastgele karşılama mesajı"""
+        """Get a random Turkish greeting"""
         return random.choice(self.system_prompts['greeting_prompts'])
     
     def get_random_story_starter(self) -> str:
-        """Rastgele hikaye başlangıcı"""
+        """Get a random Turkish story starter"""
         return random.choice(self.system_prompts['story_starters'])
     
     def get_random_story_ending(self) -> str:
-        """Rastgele hikaye sonu"""
+        """Get a random Turkish story ending"""
         return random.choice(self.system_prompts['story_endings'])
     
     def get_random_moral_lesson(self) -> str:
-        """Rastgele ahlaki ders"""
+        """Get a random moral lesson"""
         return random.choice(self.system_prompts['moral_lessons'])
     
     def create_story_prompt(self, topic: Optional[str] = None, theme: Optional[str] = None) -> str:
-        """Hikaye promptu oluşturma"""
+        """Create a story prompt based on topic and theme"""
         starter = self.get_random_story_starter()
         ending = self.get_random_story_ending()
         moral = self.get_random_moral_lesson()
         
-        # Tema seçimi
+        # Select theme
         if not theme:
             theme = random.choice(self.story_config['themes'])
         
@@ -324,23 +255,36 @@ class StorytellerLLM:
         return prompt
     
     async def generate_story(self, topic: Optional[str] = None, theme: Optional[str] = None) -> Dict[str, Any]:
-        """Hikaye üretme"""
+        """Generate a Turkish story for the child"""
         if not self.is_initialized:
-            raise RuntimeError("StorytellerLLM servisi başlatılmamış!")
+            raise RuntimeError("Turkish StorytellerLLM servisi başlatılmamış!")
         
         try:
             self.logger.info(f"Hikaye üretiliyor... Konu: {topic}, Tema: {theme}")
             
-            # Hikaye promptu oluştur
+            # Create story prompt
             story_prompt = self.create_story_prompt(topic, theme)
             
-            # Aktif servisi kullanarak hikaye üret
-            if self.llm_config['active_service'] == 'openai':
-                story_text = await self._generate_with_openai(story_prompt)
-            else:
-                story_text = await self._generate_with_gemini(story_prompt)
+            # Generate story using OpenAI
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model=self.openai_config['model'],
+                    messages=[
+                        {"role": "system", "content": self.system_prompts['main_system_prompt']},
+                        {"role": "user", "content": story_prompt}
+                    ],
+                    max_tokens=self.openai_config['max_tokens'],
+                    temperature=self.openai_config['temperature'],
+                    top_p=self.openai_config['top_p'],
+                    frequency_penalty=self.openai_config['frequency_penalty'],
+                    presence_penalty=self.openai_config['presence_penalty']
+                )
+            )
             
-            # Hikaye verilerini oluştur
+            story_text = response.choices[0].message.content.strip()
+            
+            # Create story metadata
             story_data = {
                 'text': story_text,
                 'topic': topic,
@@ -348,18 +292,17 @@ class StorytellerLLM:
                 'child_name': self.child_config['name'],
                 'timestamp': datetime.now().isoformat(),
                 'language': 'turkish',
-                'target_audience': f"{self.child_config['age']}_year_old_{self.child_config['gender']}",
+                'target_audience': self.child_config['target_audience'],
                 'word_count': len(story_text.split()),
-                'estimated_duration': len(story_text.split()) * 0.6,  # Türkçe için
-                'model_used': self.llm_config['model'],
-                'service_used': self.llm_config['active_service'],
+                'estimated_duration': len(story_text.split()) * 0.6,  # ~0.6 seconds per word in Turkish
+                'model_used': self.openai_config['model'],
                 'content_filter_level': self.story_config['content_filter']
             }
             
-            # Geçmişe ekle
+            # Add to history
             self.story_history.append(story_data)
             
-            # Son 10 hikayeyi tut
+            # Keep only last 10 stories
             if len(self.story_history) > 10:
                 self.story_history = self.story_history[-10:]
             
@@ -372,39 +315,8 @@ class StorytellerLLM:
             self.logger.error(f"Hikaye üretme hatası: {e}")
             raise
     
-    async def _generate_with_openai(self, prompt: str) -> str:
-        """OpenAI ile hikaye üretme"""
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: self.openai_client.chat.completions.create(
-                model=self.llm_config['model'],
-                messages=[
-                    {"role": "system", "content": self.system_prompts['main_system_prompt']},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=self.llm_config['max_tokens'],
-                temperature=self.llm_config['temperature'],
-                top_p=self.llm_config['top_p'],
-                frequency_penalty=self.llm_config['frequency_penalty'],
-                presence_penalty=self.llm_config['presence_penalty']
-            )
-        )
-        
-        return response.choices[0].message.content.strip()
-    
-    async def _generate_with_gemini(self, prompt: str) -> str:
-        """Gemini ile hikaye üretme"""
-        full_prompt = f"{self.system_prompts['main_system_prompt']}\n\n{prompt}"
-        
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: self.gemini_model.generate_content(full_prompt)
-        )
-        
-        return response.text.strip()
-    
     async def generate_greeting(self) -> str:
-        """Kişiselleştirilmiş karşılama üretme"""
+        """Generate a personalized Turkish greeting"""
         try:
             greeting_prompt = f"""
             {self.child_config['name']} isimli {self.child_config['age']} yaşındaki küçük prenses için 
@@ -413,23 +325,34 @@ class StorytellerLLM:
             """
             
             if not self.is_initialized:
+                # Fallback to predefined greetings
                 return self.get_random_greeting()
             
-            if self.llm_config['active_service'] == 'openai':
-                greeting = await self._generate_with_openai(greeting_prompt)
-            else:
-                greeting = await self._generate_with_gemini(greeting_prompt)
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model=self.openai_config['model'],
+                    messages=[
+                        {"role": "system", "content": self.system_prompts['main_system_prompt']},
+                        {"role": "user", "content": greeting_prompt}
+                    ],
+                    max_tokens=100,
+                    temperature=0.8
+                )
+            )
             
+            greeting = response.choices[0].message.content.strip()
             self.logger.info(f"Kişiselleştirilmiş karşılama üretildi: {greeting[:50]}...")
             
             return greeting
             
         except Exception as e:
             self.logger.error(f"Karşılama üretme hatası: {e}")
+            # Return random greeting as fallback
             return self.get_random_greeting()
     
     async def continue_story(self, story_context: str, user_input: str) -> str:
-        """Mevcut hikayeyi devam ettirme"""
+        """Continue an existing story based on user input"""
         try:
             continue_prompt = f"""
             Bu hikayenin devamını getir:
@@ -444,11 +367,20 @@ class StorytellerLLM:
             if not self.is_initialized:
                 return "Hikaye devam ettirilemiyor. Servis hazır değil."
             
-            if self.llm_config['active_service'] == 'openai':
-                continuation = await self._generate_with_openai(continue_prompt)
-            else:
-                continuation = await self._generate_with_gemini(continue_prompt)
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model=self.openai_config['model'],
+                    messages=[
+                        {"role": "system", "content": self.system_prompts['main_system_prompt']},
+                        {"role": "user", "content": continue_prompt}
+                    ],
+                    max_tokens=200,
+                    temperature=0.8
+                )
+            )
             
+            continuation = response.choices[0].message.content.strip()
             self.logger.info("Hikaye devamı üretildi")
             
             return continuation
@@ -458,60 +390,54 @@ class StorytellerLLM:
             return "Üzgünüm, hikayeyi devam ettiremiyorum. Yeni bir hikaye anlatayım mı?"
     
     def get_story_history(self) -> List[Dict[str, Any]]:
-        """Hikaye geçmişini getir"""
+        """Get the story history"""
         return self.story_history.copy()
     
     def get_last_story(self) -> Optional[Dict[str, Any]]:
-        """Son hikayeyi getir"""
+        """Get the last generated story"""
         return self.story_history[-1] if self.story_history else None
     
     def get_available_themes(self) -> List[str]:
-        """Mevcut temaları getir"""
+        """Get available story themes"""
         return self.story_config['themes'].copy()
     
     def get_service_status(self) -> Dict[str, Any]:
-        """Servis durumunu getir"""
+        """Get service status"""
         return {
             'initialized': self.is_initialized,
-            'service_name': 'StorytellerLLM',
-            'language': 'turkish',
+            'service_name': 'Turkish StorytellerLLM',
             'child_config': self.child_config,
             'story_config': self.story_config,
             'stories_generated': len(self.story_history),
             'last_story_time': self.story_history[-1]['timestamp'] if self.story_history else None,
             'available_themes': self.get_available_themes(),
-            'active_service': self.llm_config.get('active_service', 'none'),
-            'api_model': self.llm_config['model'],
-            'processing_mode': 'remote_only',
-            'openai_available': OPENAI_AVAILABLE,
-            'gemini_available': GEMINI_AVAILABLE
+            'api_model': self.openai_config['model'],
+            'processing_mode': 'remote_only'
         }
     
     async def cleanup(self) -> None:
-        """Kaynakları temizle"""
+        """Clean up resources"""
         try:
-            if self.openai_client:
-                pass  # OpenAI client explicit cleanup gerektirmez
-            
-            if self.gemini_model:
-                pass  # Gemini explicit cleanup gerektirmez
+            if self.client:
+                # OpenAI client doesn't need explicit cleanup
+                pass
             
             self.is_initialized = False
-            self.logger.info("StorytellerLLM servisi temizlendi")
+            self.logger.info("Turkish StorytellerLLM servisi temizlendi")
             
         except Exception as e:
             self.logger.error(f"Temizlik hatası: {e}")
 
-# Test fonksiyonu
-async def test_storyteller():
-    """Hikaye servisi testi"""
-    print("🎭 StorytellerLLM Test Başlıyor...")
+# Test function
+async def test_turkish_storyteller():
+    """Test the Turkish storyteller service"""
+    print("🎭 Turkish StorytellerLLM Test Başlıyor...")
     
-    # Servisi başlat
-    storyteller = StorytellerLLM()
+    # Initialize service
+    storyteller = TurkishStorytellerLLM()
     
     try:
-        # Başlatma testi
+        # Test initialization
         print("📚 Servis başlatılıyor...")
         success = await storyteller.initialize()
         
@@ -521,19 +447,19 @@ async def test_storyteller():
         
         print("✅ Servis başarıyla başlatıldı!")
         
-        # Karşılama testi
+        # Test greeting
         print("\n👋 Karşılama testi...")
         greeting = await storyteller.generate_greeting()
         print(f"Karşılama: {greeting}")
         
-        # Hikaye üretim testi
+        # Test story generation
         print("\n📖 Hikaye üretim testi...")
         story = await storyteller.generate_story(theme='prenses')
         print(f"Hikaye: {story['text'][:100]}...")
         print(f"Kelime sayısı: {story['word_count']}")
         print(f"Tahmini süre: {story['estimated_duration']:.1f} saniye")
         
-        # Servis durumu
+        # Test service status
         print("\n📊 Servis durumu:")
         status = storyteller.get_service_status()
         for key, value in status.items():
@@ -550,4 +476,4 @@ async def test_storyteller():
         await storyteller.cleanup()
 
 if __name__ == '__main__':
-    asyncio.run(test_storyteller())
+    asyncio.run(test_turkish_storyteller())

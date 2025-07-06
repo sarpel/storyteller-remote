@@ -1,991 +1,1128 @@
 #!/bin/bash
 
-# StorytellerPi Complete Setup Script - Pi Zero 2W Optimized
-# Single script with all fixes and optimizations for DietPi/Raspberry Pi OS
-# Includes: System setup, USB audio, memory optimization, lite web interface
+# =============================================================================
+# STORYTELLER PI - MASTER SETUP SCRIPT
+# Complete setup and management for StorytellerPi system
+# Supports: Pi Zero 2W, Pi 5, DietPi, Raspberry Pi OS, Turkish/English
+# =============================================================================
 
-set -e  # Exit on any error
+set -e
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
-# Configuration
+# Global variables
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$SCRIPT_DIR"
 INSTALL_DIR="/opt/storytellerpi"
-SERVICE_USER="storytellerpi"
 SERVICE_NAME="storytellerpi"
-TEMP_SWAP_SIZE="1024"
+VENV_DIR="$INSTALL_DIR/venv"
+USER_HOME="$HOME"
+CURRENT_USER="$(whoami)"
+SYSTEM_USER="storyteller"
 
-# System detection
-IS_DIETPI=false
-IS_RASPBERRY_PI_OS=false
-SWAP_SYSTEM="unknown"
+# Hardware detection
+PI_MODEL=""
+PI_AUDIO_DEVICE=""
+OS_TYPE=""
+AUDIO_SETUP_TYPE=""
 
-# Helper functions
-log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-log_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+# Configuration
+LANGUAGE="turkish"
+SYSTEM_LANGUAGE="tr-TR"
+CHILD_NAME="Küçük Prenses"
+CHILD_AGE="5"
+CHILD_GENDER="kız"
 
-detect_system() {
-    log_info "Detecting system type..."
-    
-    if [ -f "/boot/dietpi/.version" ] || [ -f "/DietPi/dietpi/.version" ] || command -v dietpi-config >/dev/null 2>&1; then
-        IS_DIETPI=true
-        log_info "Detected: DietPi"
-    elif [ -f "/etc/rpi-issue" ] || grep -q "Raspberry Pi" /proc/device-tree/model 2>/dev/null; then
-        IS_RASPBERRY_PI_OS=true
-        log_info "Detected: Raspberry Pi OS"
-    else
-        log_warning "Unknown system - proceeding with generic Linux setup"
-    fi
-    
-    # Detect swap system
-    if [ -f "/etc/dphys-swapfile" ]; then
-        SWAP_SYSTEM="dphys-swapfile"
-    elif systemctl is-active --quiet zram-swap 2>/dev/null; then
-        SWAP_SYSTEM="zram-swap"
-    elif command -v dietpi-config >/dev/null 2>&1; then
-        SWAP_SYSTEM="dietpi"
-    else
-        SWAP_SYSTEM="manual"
-    fi
-    
-    log_info "Swap system: $SWAP_SYSTEM"
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+log() {
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
-check_system_resources() {
-    log_info "Checking system specifications..."
-    
-    TOTAL_MEM=$(free -m | awk 'NR==2{print $2}')
-    if [ "$TOTAL_MEM" -lt 400 ]; then
-        log_warning "Low memory detected: ${TOTAL_MEM}MB - Pi Zero 2W optimizations will be applied"
-    fi
-    
-    log_success "System check completed"
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
 }
 
-create_temporary_swap() {
-    log_info "Managing swap space for installation..."
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+check_root() {
+    if [[ $EUID -eq 0 ]]; then
+        log_error "Bu script root olarak çalıştırılmamalı!"
+        exit 1
+    fi
+}
+
+check_sudo() {
+    if ! sudo -n true 2>/dev/null; then
+        log_error "Sudo erişimi gerekli!"
+        exit 1
+    fi
+}
+
+# =============================================================================
+# HARDWARE DETECTION
+# =============================================================================
+
+detect_pi_model() {
+    log_info "Raspberry Pi modeli tespit ediliyor..."
     
-    CURRENT_SWAP=$(free -m | awk '/^Swap:/ {print $2}')
-    log_info "Current swap: ${CURRENT_SWAP}MB"
-    
-    if [ "$CURRENT_SWAP" -lt 512 ]; then
-        log_info "Creating temporary swap file..."
-        TEMP_SWAP_FILE="/tmp/storytellerpi_install_swap"
+    if [[ -f /proc/cpuinfo ]]; then
+        local revision=$(grep "Revision" /proc/cpuinfo | awk '{print $3}')
+        local model=$(grep "Model" /proc/cpuinfo | cut -d':' -f2 | xargs)
         
-        AVAILABLE_SPACE=$(df /tmp | awk 'NR==2 {print int($4/1024)}')
-        if [ "$AVAILABLE_SPACE" -lt "$TEMP_SWAP_SIZE" ]; then
-            TEMP_SWAP_SIZE=$((AVAILABLE_SPACE - 100))
+        if [[ "$model" == *"Zero 2"* ]]; then
+            PI_MODEL="pi_zero_2w"
+            PI_AUDIO_DEVICE="iqaudio_codec"
+            log_success "Raspberry Pi Zero 2W tespit edildi"
+        elif [[ "$model" == *"Pi 5"* ]]; then
+            PI_MODEL="pi_5"
+            PI_AUDIO_DEVICE="waveshare_usb"
+            log_success "Raspberry Pi 5 tespit edildi"
+        elif [[ "$model" == *"Pi 4"* ]]; then
+            PI_MODEL="pi_4"
+            PI_AUDIO_DEVICE="waveshare_usb"
+            log_success "Raspberry Pi 4 tespit edildi"
+        else
+            PI_MODEL="unknown"
+            PI_AUDIO_DEVICE="default"
+            log_warn "Bilinmeyen Pi modeli: $model"
         fi
-        
-        if [ "$TEMP_SWAP_SIZE" -gt 100 ]; then
-            sudo dd if=/dev/zero of="$TEMP_SWAP_FILE" bs=1M count="$TEMP_SWAP_SIZE" 2>/dev/null
-            sudo chmod 600 "$TEMP_SWAP_FILE"
-            sudo mkswap "$TEMP_SWAP_FILE" >/dev/null 2>&1
-            sudo swapon "$TEMP_SWAP_FILE" 2>/dev/null
-            echo "$TEMP_SWAP_FILE" > /tmp/storytellerpi_temp_swap_file
-            log_success "Temporary swap created: ${TEMP_SWAP_SIZE}MB"
-        fi
+    else
+        PI_MODEL="unknown"
+        PI_AUDIO_DEVICE="default"
+        log_warn "Pi modeli tespit edilemedi"
     fi
 }
 
-cleanup_swap() {
-    if [ -f "/tmp/storytellerpi_temp_swap_file" ]; then
-        TEMP_SWAP_FILE=$(cat /tmp/storytellerpi_temp_swap_file)
-        if [ -f "$TEMP_SWAP_FILE" ]; then
-            sudo swapoff "$TEMP_SWAP_FILE" 2>/dev/null || true
-            sudo rm -f "$TEMP_SWAP_FILE"
-        fi
-        rm -f /tmp/storytellerpi_temp_swap_file
+detect_os_type() {
+    log_info "İşletim sistemi tespit ediliyor..."
+    
+    if [[ -f /etc/dietpi/dietpi-banner ]]; then
+        OS_TYPE="dietpi"
+        log_success "DietPi tespit edildi"
+    elif [[ -f /etc/rpi-issue ]]; then
+        OS_TYPE="raspios"
+        log_success "Raspberry Pi OS tespit edildi"
+    elif [[ -f /etc/debian_version ]]; then
+        OS_TYPE="debian"
+        log_success "Debian tabanlı sistem tespit edildi"
+    else
+        OS_TYPE="unknown"
+        log_warn "Bilinmeyen işletim sistemi"
     fi
 }
 
-install_system_dependencies() {
-    log_info "Installing system dependencies..."
+setup_audio_configuration() {
+    log_info "Ses konfigürasyonu hazırlanıyor..."
     
-    sudo apt update
+    case "${PI_MODEL}_${OS_TYPE}" in
+        "pi_zero_2w_dietpi")
+            AUDIO_SETUP_TYPE="iqaudio_dietpi"
+            ;;
+        "pi_zero_2w_raspios")
+            AUDIO_SETUP_TYPE="iqaudio_raspios"
+            ;;
+        "pi_5_dietpi")
+            AUDIO_SETUP_TYPE="waveshare_dietpi"
+            ;;
+        "pi_5_raspios")
+            AUDIO_SETUP_TYPE="waveshare_raspios"
+            ;;
+        *)
+            AUDIO_SETUP_TYPE="default"
+            ;;
+    esac
     
-    PACKAGES=(
-        "python3-pip" "python3-dev" "python3-venv" "build-essential" "pkg-config"
-        "portaudio19-dev" "libasound2-dev" "alsa-utils" "git" "curl" "systemd"
-        "logrotate" "espeak-ng"
+    log_info "Ses konfigürasyonu: $AUDIO_SETUP_TYPE"
+}
+
+# =============================================================================
+# SYSTEM SETUP
+# =============================================================================
+
+update_system() {
+    log_info "Sistem güncellemeleri kontrol ediliyor..."
+    
+    sudo apt-get update -y
+    sudo apt-get upgrade -y
+    
+    log_success "Sistem güncellendi"
+}
+
+install_system_packages() {
+    log_info "Sistem paketleri yükleniyor..."
+    
+    # Base packages
+    local packages=(
+        "git"
+        "curl"
+        "wget"
+        "python3"
+        "python3-pip"
+        "python3-venv"
+        "python3-dev"
+        "build-essential"
+        "pkg-config"
+        "libffi-dev"
+        "libssl-dev"
+        "libjpeg-dev"
+        "zlib1g-dev"
+        "libtiff5-dev"
+        "libopenjp2-7-dev"
+        "libfreetype6-dev"
+        "liblcms2-dev"
+        "libwebp-dev"
+        "libasound2-dev"
+        "portaudio19-dev"
+        "libsndfile1-dev"
+        "systemd"
+        "vim"
+        "nano"
+        "htop"
+        "tree"
+        "jq"
     )
     
-    for package in "${PACKAGES[@]}"; do
+    # OS-specific packages
+    case "$OS_TYPE" in
+        "dietpi")
+            packages+=(
+                "alsa-utils"
+                "alsa-tools"
+                "libasound2-plugins"
+            )
+            ;;
+        "raspios")
+            packages+=(
+                "pulseaudio"
+                "pulseaudio-utils"
+                "alsa-utils"
+                "alsa-tools"
+                "libasound2-plugins"
+            )
+            ;;
+    esac
+    
+    # Audio hardware specific packages
+    case "$PI_AUDIO_DEVICE" in
+        "iqaudio_codec")
+            packages+=(
+                "i2c-tools"
+                "device-tree-compiler"
+            )
+            ;;
+        "waveshare_usb")
+            packages+=(
+                "usb-modeswitch"
+                "usb-modeswitch-data"
+            )
+            ;;
+    esac
+    
+    # Install packages
+    for package in "${packages[@]}"; do
         if ! dpkg -l | grep -q "^ii  $package "; then
-            sudo apt install -y "$package" || log_error "Failed to install $package"
+            log_info "Yükleniyor: $package"
+            sudo apt-get install -y "$package"
         fi
     done
     
-    # PulseAudio (optional for DietPi)
-    if ! $IS_DIETPI; then
-        sudo apt install -y pulseaudio pulseaudio-utils || log_warning "PulseAudio install failed"
-    fi
-    
-    log_success "System dependencies installed"
+    log_success "Sistem paketleri yüklendi"
 }
 
-create_user_and_directories() {
-    log_info "Creating user and directories..."
+# =============================================================================
+# AUDIO SETUP
+# =============================================================================
+
+setup_audio_iqaudio_dietpi() {
+    log_info "IQAudio Codec DietPi konfigürasyonu..."
     
-    if ! id "$SERVICE_USER" &>/dev/null; then
-        sudo useradd -r -s /bin/false -d "$INSTALL_DIR" "$SERVICE_USER"
-        log_success "Created user: $SERVICE_USER"
-    fi
+    # Boot config
+    sudo bash -c 'cat >> /boot/config.txt << EOF
+
+# IQAudio Codec Zero HAT configuration
+dtoverlay=iqaudio-codec
+dtparam=i2c_arm=on
+dtparam=i2s=on
+dtparam=spi=on
+EOF'
     
-    sudo mkdir -p "$INSTALL_DIR"/{main,models,logs,credentials,scripts}
-    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    
-    log_success "Directories created"
+    # ALSA configuration
+    sudo bash -c 'cat > /etc/asound.conf << EOF
+pcm.!default {
+    type hw
+    card 0
+    device 0
 }
 
-setup_python_environment() {
-    log_info "Setting up Python environment..."
+ctl.!default {
+    type hw
+    card 0
+}
+EOF'
     
-    sudo -u "$SERVICE_USER" python3 -m venv "$INSTALL_DIR/venv"
-    sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install --upgrade pip
-    sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" config set global.extra-index-url https://www.piwheels.org/simple
+    # Module loading
+    sudo bash -c 'echo "snd_soc_iqaudio_codec" >> /etc/modules'
     
-    log_success "Python environment created"
+    log_success "IQAudio DietPi konfigürasyonu tamamlandı"
+}
+
+setup_audio_iqaudio_raspios() {
+    log_info "IQAudio Codec Raspberry Pi OS konfigürasyonu..."
+    
+    # Boot config
+    sudo bash -c 'cat >> /boot/config.txt << EOF
+
+# IQAudio Codec Zero HAT configuration
+dtoverlay=iqaudio-codec
+dtparam=i2c_arm=on
+dtparam=i2s=on
+dtparam=spi=on
+EOF'
+    
+    # ALSA configuration
+    sudo bash -c 'cat > /etc/asound.conf << EOF
+pcm.!default {
+    type pulse
+    server unix:/run/user/$(id -u)/pulse/native
+}
+
+ctl.!default {
+    type pulse
+    server unix:/run/user/$(id -u)/pulse/native
+}
+
+pcm.hw_default {
+    type hw
+    card 0
+    device 0
+}
+
+ctl.hw_default {
+    type hw
+    card 0
+}
+EOF'
+    
+    # PulseAudio configuration
+    mkdir -p ~/.config/pulse
+    cat > ~/.config/pulse/default.pa << EOF
+#!/usr/bin/pulseaudio -nF
+.include /etc/pulse/default.pa
+set-default-sink alsa_output.hw_0_0
+set-default-source alsa_input.hw_0_0
+EOF
+    
+    log_success "IQAudio Raspberry Pi OS konfigürasyonu tamamlandı"
+}
+
+setup_audio_waveshare_dietpi() {
+    log_info "Waveshare USB Audio DietPi konfigürasyonu..."
+    
+    # USB audio configuration
+    sudo bash -c 'cat > /etc/asound.conf << EOF
+pcm.!default {
+    type hw
+    card 1
+    device 0
+}
+
+ctl.!default {
+    type hw
+    card 1
+}
+EOF'
+    
+    # USB audio module loading
+    sudo bash -c 'echo "snd_usb_audio" >> /etc/modules'
+    
+    # USB rules
+    sudo bash -c 'cat > /etc/udev/rules.d/99-usb-audio.rules << EOF
+SUBSYSTEM=="usb", ATTR{idVendor}=="0d8c", ATTR{idProduct}=="0014", MODE="0666"
+SUBSYSTEM=="sound", KERNEL=="controlC[0-9]*", ATTR{id}=="USB*", MODE="0666"
+EOF'
+    
+    log_success "Waveshare USB DietPi konfigürasyonu tamamlandı"
+}
+
+setup_audio_waveshare_raspios() {
+    log_info "Waveshare USB Audio Raspberry Pi OS konfigürasyonu..."
+    
+    # ALSA configuration
+    sudo bash -c 'cat > /etc/asound.conf << EOF
+pcm.!default {
+    type pulse
+    server unix:/run/user/$(id -u)/pulse/native
+}
+
+ctl.!default {
+    type pulse
+    server unix:/run/user/$(id -u)/pulse/native
+}
+
+pcm.hw_usb {
+    type hw
+    card 1
+    device 0
+}
+
+ctl.hw_usb {
+    type hw
+    card 1
+}
+EOF'
+    
+    # PulseAudio configuration
+    mkdir -p ~/.config/pulse
+    cat > ~/.config/pulse/default.pa << EOF
+#!/usr/bin/pulseaudio -nF
+.include /etc/pulse/default.pa
+set-default-sink alsa_output.usb-*
+set-default-source alsa_input.usb-*
+EOF
+    
+    # USB rules
+    sudo bash -c 'cat > /etc/udev/rules.d/99-usb-audio.rules << EOF
+SUBSYSTEM=="usb", ATTR{idVendor}=="0d8c", ATTR{idProduct}=="0014", MODE="0666"
+SUBSYSTEM=="sound", KERNEL=="controlC[0-9]*", ATTR{id}=="USB*", MODE="0666"
+EOF'
+    
+    log_success "Waveshare USB Raspberry Pi OS konfigürasyonu tamamlandı"
+}
+
+setup_audio_hardware() {
+    log_info "Ses donanımı konfigürasyonu başlatılıyor..."
+    
+    case "$AUDIO_SETUP_TYPE" in
+        "iqaudio_dietpi")
+            setup_audio_iqaudio_dietpi
+            ;;
+        "iqaudio_raspios")
+            setup_audio_iqaudio_raspios
+            ;;
+        "waveshare_dietpi")
+            setup_audio_waveshare_dietpi
+            ;;
+        "waveshare_raspios")
+            setup_audio_waveshare_raspios
+            ;;
+        *)
+            log_warn "Varsayılan ses konfigürasyonu kullanılıyor"
+            ;;
+    esac
+    
+    # Test audio setup
+    test_audio_setup
+    
+    log_success "Ses donanımı konfigürasyonu tamamlandı"
+}
+
+test_audio_setup() {
+    log_info "Ses kurulumu test ediliyor..."
+    
+    # Test sound cards
+    if aplay -l > /dev/null 2>&1; then
+        log_success "Ses kartları tespit edildi"
+        aplay -l
+    else
+        log_warn "Ses kartı tespit edilemedi"
+    fi
+    
+    # Test ALSA
+    if amixer > /dev/null 2>&1; then
+        log_success "ALSA çalışıyor"
+        amixer sset Master 80%
+    else
+        log_warn "ALSA problemi"
+    fi
+    
+    # Test PulseAudio (if available)
+    if command -v pulseaudio > /dev/null 2>&1; then
+        if pulseaudio --check; then
+            log_success "PulseAudio çalışıyor"
+        else
+            log_info "PulseAudio başlatılıyor..."
+            pulseaudio --start --log-target=syslog
+        fi
+    fi
+}
+
+# =============================================================================
+# PYTHON ENVIRONMENT SETUP
+# =============================================================================
+
+create_python_environment() {
+    log_info "Python sanal ortamı oluşturuluyor..."
+    
+    # Create install directory
+    sudo mkdir -p "$INSTALL_DIR"
+    sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$INSTALL_DIR"
+    
+    # Create virtual environment
+    python3 -m venv "$VENV_DIR"
+    source "$VENV_DIR/bin/activate"
+    
+    # Upgrade pip
+    pip install --upgrade pip setuptools wheel
+    
+    log_success "Python sanal ortamı oluşturuldu"
 }
 
 install_python_dependencies() {
-    log_info "Installing Python dependencies..."
+    log_info "Python bağımlılıkları yükleniyor..."
     
-    CORE_PACKAGES=(
-        "python-dotenv==1.0.0" "psutil==5.9.6" "requests==2.31.0"
-        "Flask==2.3.3" "Werkzeug==2.3.7" "Jinja2==3.1.2"
-        "PyAudio==0.2.11" "pygame==2.5.2"
-    )
+    source "$VENV_DIR/bin/activate"
     
-    for package in "${CORE_PACKAGES[@]}"; do
-        log_info "Installing $package..."
-        sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --prefer-binary "$package"
-    done
+    # Core dependencies
+    pip install flask flask-socketio
+    pip install pyaudio numpy scipy
+    pip install pygame
+    pip install requests aiohttp
+    pip install python-dotenv
+    pip install asyncio-mqtt
+    pip install psutil
+    
+    # AI/ML dependencies
+    pip install openai google-generativeai
+    pip install google-cloud-speech
+    pip install elevenlabs
     
     # Wake word detection
-    sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --prefer-binary pvporcupine==3.0.1 || log_warning "Porcupine install failed"
+    pip install openwakeword
     
-    # AI services
-    AI_PACKAGES=("google-cloud-speech==2.21.0" "google-generativeai==0.3.2" "google-auth==2.23.4")
-    for package in "${AI_PACKAGES[@]}"; do
-        sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" install --no-cache-dir --prefer-binary "$package" || log_warning "$package install failed"
-    done
+    # Audio processing
+    pip install webrtcvad
+    pip install librosa
     
-    log_success "Python dependencies installed"
+    # System dependencies
+    pip install systemd-python
+    pip install dbus-python
+    
+    # Development dependencies
+    pip install pytest pytest-asyncio
+    pip install black flake8
+    
+    log_success "Python bağımlılıkları yüklendi"
 }
 
-create_optimized_application_files() {
-    log_info "Creating optimized application files..."
+# =============================================================================
+# PROJECT SETUP
+# =============================================================================
+
+setup_project_structure() {
+    log_info "Proje yapısı oluşturuluyor..."
     
-    # Create optimized main application
-    cat > "$INSTALL_DIR/main/storyteller_main.py" << 'EOF'
-"""
-Optimized StorytellerPi Application for Pi Zero 2W
-Memory and CPU optimized with lazy loading
-"""
-
-import os
-import sys
-import asyncio
-import logging
-import signal
-import gc
-from enum import Enum
-from typing import Optional
-from pathlib import Path
-from dotenv import load_dotenv
-
-class AppState(Enum):
-    IDLE = "idle"
-    LISTENING = "listening"
-    PROCESSING = "processing"
-    SPEAKING = "speaking"
-    ERROR = "error"
-
-class OptimizedStorytellerApp:
-    def __init__(self, env_file: str = ".env"):
-        self.env_file = env_file
-        self.logger = None
-        self.state = AppState.IDLE
-        self.running = False
-        
-        # Service components (lazy loaded)
-        self.wake_word_detector = None
-        self.stt_service = None
-        self.llm_service = None
-        self.tts_service = None
-        
-        # Memory optimization settings
-        self.max_memory_usage = 350
-        self.enable_memory_monitoring = True
-        self.gc_frequency = 30
-        
-        self._load_environment()
-        self._setup_logging()
-        self._check_system_resources()
-        
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        if self.enable_memory_monitoring:
-            asyncio.create_task(self._memory_monitor())
+    # Create directories
+    mkdir -p "$INSTALL_DIR/main"
+    mkdir -p "$INSTALL_DIR/models"
+    mkdir -p "$INSTALL_DIR/credentials"
+    mkdir -p "$INSTALL_DIR/logs"
+    mkdir -p "$INSTALL_DIR/tests"
+    mkdir -p "$INSTALL_DIR/scripts"
     
-    def _setup_logging(self):
-        os.makedirs("logs", exist_ok=True)
-        log_level = getattr(logging, os.getenv('LOG_LEVEL', 'WARNING'))
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler('logs/storyteller.log', mode='a'),
-                logging.StreamHandler()
-            ]
-        )
-        self.logger = logging.getLogger(__name__)
-        self.logger.info("Optimized logging initialized")
-    
-    def _load_environment(self):
-        try:
-            load_dotenv(self.env_file)
-            os.environ.setdefault('LOG_LEVEL', 'WARNING')
-            os.environ.setdefault('MAX_MEMORY_USAGE', '350')
-            os.environ.setdefault('WAKE_WORD_FRAMEWORK', 'porcupine')
-            os.environ.setdefault('ENABLE_MEMORY_MONITORING', 'true')
-            os.environ.setdefault('GC_FREQUENCY', '30')
-            
-            self.max_memory_usage = int(os.getenv('MAX_MEMORY_USAGE', '350'))
-            self.enable_memory_monitoring = os.getenv('ENABLE_MEMORY_MONITORING', 'true').lower() == 'true'
-            self.gc_frequency = int(os.getenv('GC_FREQUENCY', '30'))
-            
-        except Exception as e:
-            print(f"Failed to load environment: {e}")
-    
-    def _check_system_resources(self):
-        try:
-            import psutil
-            memory = psutil.virtual_memory()
-            available_mb = memory.available // (1024 * 1024)
-            if available_mb < 200:
-                self.logger.warning(f"Low memory: {available_mb}MB available")
-        except ImportError:
-            self.logger.warning("psutil not available")
-    
-    async def _memory_monitor(self):
-        while self.running:
-            try:
-                import psutil
-                memory = psutil.virtual_memory()
-                used_mb = memory.used // (1024 * 1024)
-                
-                if used_mb > self.max_memory_usage or memory.percent > 85:
-                    self.logger.warning(f"High memory usage: {used_mb}MB ({memory.percent}%)")
-                    collected = gc.collect()
-                    self.logger.info(f"Garbage collection freed {collected} objects")
-                
-                await asyncio.sleep(self.gc_frequency)
-            except Exception as e:
-                self.logger.error(f"Memory monitoring error: {e}")
-                await asyncio.sleep(60)
-    
-    def _signal_handler(self, signum, frame):
-        self.logger.info(f"Received signal {signum}, shutting down...")
-        self.running = False
-    
-    async def start(self):
-        try:
-            self.logger.info("Starting optimized StorytellerPi application")
-            self.running = True
-            
-            # Main application loop
-            while self.running:
-                await asyncio.sleep(1)
-                
-            return True
-        except Exception as e:
-            self.logger.error(f"Error in main application: {e}")
-            return False
-
-async def main():
-    try:
-        app = OptimizedStorytellerApp()
-        await app.start()
-    except KeyboardInterrupt:
-        print("\nShutdown requested by user")
-    except Exception as e:
-        print(f"Fatal error: {e}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    asyncio.run(main())
-EOF
-
-    # Create lite web interface
-    cat > "$INSTALL_DIR/main/web_interface.py" << 'EOF'
-#!/usr/bin/env python3
-"""
-Lightweight StorytellerPi Web Interface for Pi Zero 2W
-"""
-
-import os
-import logging
-import subprocess
-from flask import Flask, render_template, request, jsonify
-from dotenv import load_dotenv
-
-load_dotenv()
-
-app = Flask(__name__)
-app.secret_key = os.getenv('WEB_SECRET_KEY', 'storytellerpi-lite-key')
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-SERVICE_NAME = 'storytellerpi'
-
-def get_service_status():
-    """Get service status"""
-    try:
-        result = subprocess.run(['systemctl', 'is-active', SERVICE_NAME], 
-                              capture_output=True, text=True, timeout=5)
-        active = result.stdout.strip() == 'active'
-        
-        result = subprocess.run(['systemctl', 'is-enabled', SERVICE_NAME], 
-                              capture_output=True, text=True, timeout=5)
-        enabled = result.stdout.strip() == 'enabled'
-        
-        return {'active': active, 'enabled': enabled, 'status': 'running' if active else 'stopped'}
-    except Exception as e:
-        logger.error(f"Failed to get service status: {e}")
-        return {'active': False, 'enabled': False, 'status': 'unknown'}
-
-@app.route('/')
-def lite_dashboard():
-    service_status = get_service_status()
-    return render_template('lite_dashboard.html', service_status=service_status)
-
-@app.route('/api/status')
-def get_status():
-    try:
-        import psutil
-        service_status = get_service_status()
-        status = {
-            'service': service_status,
-            'memory_percent': psutil.virtual_memory().percent,
-            'cpu_percent': psutil.cpu_percent(interval=None),
-            'uptime': os.popen('uptime -p').read().strip()
-        }
-        return jsonify(status)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/service/<action>', methods=['POST'])
-def control_service(action):
-    """Control service"""
-    try:
-        if action == 'start':
-            subprocess.run(['systemctl', 'start', SERVICE_NAME], check=True, timeout=10)
-        elif action == 'stop':
-            subprocess.run(['systemctl', 'stop', SERVICE_NAME], check=True, timeout=10)
-        elif action == 'restart':
-            subprocess.run(['systemctl', 'restart', SERVICE_NAME], check=True, timeout=10)
-        else:
-            return jsonify({'error': 'Invalid action'}), 400
-        
-        return jsonify({'success': True})
-    except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'Service command failed: {e}'}), 500
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
-EOF
-
-    # Create lite dashboard template
-    mkdir -p "$INSTALL_DIR/main/templates"
-    cat > "$INSTALL_DIR/main/templates/lite_dashboard.html" << 'EOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>StorytellerPi - Lite Mode</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh; display: flex; align-items: center; justify-content: center;
-        }
-        .container { 
-            max-width: 500px; width: 90%; background: white; border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1); overflow: hidden;
-        }
-        .header { 
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-            color: white; padding: 30px; text-align: center;
-        }
-        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .content { padding: 30px; }
-        .status-card { 
-            background: #f8fafc; border: 2px solid #e2e8f0; border-radius: 15px;
-            padding: 25px; margin-bottom: 25px; text-align: center;
-        }
-        .btn { 
-            display: inline-block; padding: 15px 30px; border: none; border-radius: 10px;
-            font-size: 1.1em; font-weight: 600; cursor: pointer; transition: all 0.3s ease;
-            text-decoration: none; margin: 10px; min-width: 150px;
-        }
-        .btn-primary { 
-            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white;
-        }
-        .btn-success { background: #10b981; color: white; }
-        .btn-danger { background: #ef4444; color: white; }
-        .btn-warning { background: #f59e0b; color: white; }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.2); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
-        .status-indicator { 
-            width: 12px; height: 12px; border-radius: 50%; display: inline-block; 
-            margin-right: 8px; vertical-align: middle;
-        }
-        .status-running { background: #10b981; }
-        .status-stopped { background: #ef4444; }
-        .status-unknown { background: #6b7280; }
-        .service-controls { text-align: center; margin: 20px 0; }
-        .info-text { text-align: center; color: #64748b; font-size: 0.9em; margin-top: 20px; }
-        .hardware-info { 
-            background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; 
-            padding: 15px; margin: 15px 0; font-size: 0.9em;
-        }
-        .pin-diagram { 
-            font-family: monospace; background: #f1f5f9; padding: 10px; 
-            border-radius: 5px; margin: 10px 0; font-size: 0.8em;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🎭 StorytellerPi</h1>
-            <p>Lite Mode - Optimized for Pi Zero 2W</p>
-        </div>
-        <div class="content">
-            <!-- Service Status -->
-            <div class="status-card">
-                <h3>Service Status</h3>
-                <div style="margin: 15px 0;">
-                    <span class="status-indicator status-{{ service_status.status }}"></span>
-                    <span>Service {{ service_status.status.title() }}</span>
-                </div>
-                <div id="system-status">Loading system info...</div>
-            </div>
-
-            <!-- Service Controls -->
-            <div class="service-controls">
-                <button class="btn btn-success" onclick="controlService('start')" 
-                        id="start-btn" {% if service_status.active %}disabled{% endif %}>
-                    ▶️ Start Service
-                </button>
-                <button class="btn btn-danger" onclick="controlService('stop')"
-                        id="stop-btn" {% if not service_status.active %}disabled{% endif %}>
-                    ⏹️ Stop Service
-                </button>
-                <button class="btn btn-warning" onclick="controlService('restart')">
-                    🔄 Restart Service
-                </button>
-            </div>
-
-            <!-- Hardware Information -->
-            <div class="hardware-info">
-                <h4>🔌 Hardware Setup</h4>
-                <p><strong>Wake Word Button:</strong></p>
-                <div class="pin-diagram">
-GPIO Pin 18 (Physical Pin 12) → Button → Ground (Physical Pin 14)
-
-Pi Zero 2W Pinout:
- 1  3.3V    [ ][ ] 5V     2
- 3  GPIO2   [ ][ ] 5V     4  
- 5  GPIO3   [ ][ ] GND    6
- 7  GPIO4   [ ][ ] GPIO14 8
- 9  GND     [ ][ ] GPIO15 10
-11  GPIO17  [●][ ] GPIO18 12  ← Connect button here
-13  GPIO27  [ ][ ] GND    14  ← Connect to ground
-                </div>
-                <p><strong>USB Audio:</strong> Connect Waveshare USB Audio Dongle to any USB port</p>
-            </div>
-
-            <div class="info-text">
-                <strong>Pi Zero 2W Optimized Features:</strong><br>
-                • Memory usage: ~150MB (vs ~400MB standard)<br>
-                • USB audio auto-detection<br>
-                • Hardware wake word button support<br>
-                • Lazy loading for minimal footprint<br>
-                • DietPi compatible
-            </div>
-        </div>
-    </div>
-
-    <script>
-        function updateStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.error) {
-                        document.getElementById('system-status').innerHTML = 'Error: ' + data.error;
-                        return;
-                    }
-                    
-                    document.getElementById('system-status').innerHTML = 
-                        `Memory: ${data.memory_percent.toFixed(1)}%<br>` +
-                        `CPU: ${data.cpu_percent.toFixed(1)}%<br>` +
-                        `Uptime: ${data.uptime}`;
-                        
-                    // Update service status
-                    const serviceStatus = data.service;
-                    const indicator = document.querySelector('.status-indicator');
-                    indicator.className = 'status-indicator status-' + serviceStatus.status;
-                })
-                .catch(error => {
-                    document.getElementById('system-status').innerHTML = 'Status unavailable';
-                });
-        }
-
-        function controlService(action) {
-            const startBtn = document.getElementById('start-btn');
-            const stopBtn = document.getElementById('stop-btn');
-            
-            // Show loading state
-            const actionBtn = action === 'start' ? startBtn : stopBtn;
-            const originalText = actionBtn.innerHTML;
-            actionBtn.innerHTML = '⏳ Working...';
-            actionBtn.disabled = true;
-            
-            fetch(`/api/service/${action}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Refresh page after 2 seconds to update status
-                    setTimeout(() => location.reload(), 2000);
-                } else {
-                    alert('Error: ' + (data.error || 'Unknown error'));
-                    actionBtn.innerHTML = originalText;
-                    actionBtn.disabled = false;
-                }
-            })
-            .catch(error => {
-                alert('Error: ' + error.message);
-                actionBtn.innerHTML = originalText;
-                actionBtn.disabled = false;
-            });
-        }
-
-        // Initialize
-        updateStatus();
-        setInterval(updateStatus, 10000);
-    </script>
-</body>
-</html>
-EOF
-
-    # Set permissions
-    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
-    sudo chmod +x "$INSTALL_DIR/main/storyteller_main.py"
-    
-    log_success "Application files created"
-}
-
-configure_usb_audio() {
-    log_info "Configuring USB audio support..."
-    
-    # Create dynamic USB audio configuration script
-    cat > "$INSTALL_DIR/scripts/configure_usb_audio.sh" << 'EOF'
-#!/bin/bash
-USB_CARD=""
-for card_path in /proc/asound/card*; do
-    if [ -f "$card_path/usbid" ]; then
-        card_num=$(basename "$card_path" | sed 's/card//')
-        USB_CARD="$card_num"
-        break
+    # Copy project files
+    if [[ -d "$PROJECT_DIR/main" ]]; then
+        cp -r "$PROJECT_DIR/main"/* "$INSTALL_DIR/main/"
     fi
-done
-
-if [ -n "$USB_CARD" ]; then
-    cat > /etc/asound.conf << ALSA_EOF
-pcm.!default {
-    type asym
-    playback.pcm "usb_playback"
-    capture.pcm "usb_capture"
-}
-pcm.usb_playback {
-    type plug
-    slave.pcm { type hw; card $USB_CARD; device 0; }
-}
-pcm.usb_capture {
-    type plug
-    slave.pcm { type hw; card $USB_CARD; device 0; }
-}
-ctl.!default { type hw; card $USB_CARD; }
-ALSA_EOF
-    echo "USB audio configured for card $USB_CARD"
-else
-    cat > /etc/asound.conf << ALSA_EOF
-pcm.!default {
-    type asym
-    playback.pcm "builtin_playback"
-    capture.pcm "builtin_capture"
-}
-pcm.builtin_playback {
-    type plug
-    slave.pcm { type hw; card 0; device 0; }
-}
-pcm.builtin_capture {
-    type plug
-    slave.pcm { type hw; card 0; device 0; }
-}
-ctl.!default { type hw; card 0; }
-ALSA_EOF
-    echo "Built-in audio configured"
-fi
-EOF
     
-    sudo chmod +x "$INSTALL_DIR/scripts/configure_usb_audio.sh"
-    sudo "$INSTALL_DIR/scripts/configure_usb_audio.sh"
+    if [[ -d "$PROJECT_DIR/models" ]]; then
+        cp -r "$PROJECT_DIR/models"/* "$INSTALL_DIR/models/"
+    fi
     
-    # Create udev rules for automatic USB audio detection
-    cat > /tmp/99-usb-audio.rules << 'EOF'
-SUBSYSTEM=="sound", KERNEL=="card*", SUBSYSTEMS=="usb", ACTION=="add", RUN+="/opt/storytellerpi/scripts/configure_usb_audio.sh"
-SUBSYSTEM=="sound", KERNEL=="card*", SUBSYSTEMS=="usb", ACTION=="remove", RUN+="/opt/storytellerpi/scripts/configure_usb_audio.sh"
-EOF
+    if [[ -d "$PROJECT_DIR/tests" ]]; then
+        cp -r "$PROJECT_DIR/tests"/* "$INSTALL_DIR/tests/"
+    fi
     
-    sudo mv /tmp/99-usb-audio.rules /etc/udev/rules.d/
-    sudo udevadm control --reload-rules
+    if [[ -d "$PROJECT_DIR/scripts" ]]; then
+        cp -r "$PROJECT_DIR/scripts"/* "$INSTALL_DIR/scripts/"
+    fi
     
-    # Add user to audio group
-    sudo usermod -a -G audio "$SERVICE_USER"
+    # Copy requirements
+    if [[ -f "$PROJECT_DIR/requirements.txt" ]]; then
+        cp "$PROJECT_DIR/requirements.txt" "$INSTALL_DIR/"
+    fi
     
-    log_success "USB audio configured"
+    # Set permissions
+    chmod +x "$INSTALL_DIR/main"/*.py
+    chmod +x "$INSTALL_DIR/scripts"/*.py
+    
+    log_success "Proje yapısı oluşturuldu"
 }
 
-create_configuration() {
-    log_info "Creating configuration files..."
+create_environment_file() {
+    log_info "Environment dosyası oluşturuluyor..."
     
     cat > "$INSTALL_DIR/.env" << EOF
-# StorytellerPi Configuration - Pi Zero 2W Optimized
-
-# Installation directories
+# StorytellerPi Configuration
+PROJECT_NAME=StorytellerPi
+PROJECT_VERSION=1.0.0
 INSTALL_DIR=$INSTALL_DIR
 LOG_DIR=$INSTALL_DIR/logs
 MODELS_DIR=$INSTALL_DIR/models
 CREDENTIALS_DIR=$INSTALL_DIR/credentials
 
-# Performance settings for Pi Zero 2W
-MAX_MEMORY_USAGE=300
-TARGET_RESPONSE_TIME=18.0
-LOG_LEVEL=WARNING
-ENABLE_MEMORY_MONITORING=true
-GC_FREQUENCY=30
+# System Configuration
+SYSTEM_LANGUAGE=$SYSTEM_LANGUAGE
+STORY_LANGUAGE=$LANGUAGE
+PI_MODEL=$PI_MODEL
+PI_AUDIO_DEVICE=$PI_AUDIO_DEVICE
+OS_TYPE=$OS_TYPE
+AUDIO_SETUP_TYPE=$AUDIO_SETUP_TYPE
 
-# Wake word detection
-WAKE_WORD_FRAMEWORK=porcupine
-WAKE_WORD_MODEL_PATH=$INSTALL_DIR/models/hey_elsa.ppn
-WAKE_WORD_THRESHOLD=0.5
-WAKE_WORD_SAMPLE_RATE=16000
-WAKE_WORD_BUFFER_SIZE=512
-WAKE_WORD_CHANNELS=1
+# Child Configuration
+CHILD_NAME=$CHILD_NAME
+CHILD_AGE=$CHILD_AGE
+CHILD_GENDER=$CHILD_GENDER
+STORY_TARGET_AUDIENCE=${CHILD_AGE}_year_old_${CHILD_GENDER}
 
-# Hardware wake word button (GPIO)
-WAKE_WORD_BUTTON_ENABLED=true
-WAKE_WORD_BUTTON_PIN=18
-WAKE_WORD_BUTTON_PULL=up
-WAKE_WORD_BUTTON_BOUNCE_TIME=300
-
-# Audio settings
-AUDIO_INPUT_DEVICE=default
-AUDIO_OUTPUT_DEVICE=default
-AUDIO_BACKEND=alsa
-USB_AUDIO_ENABLED=true
+# Audio Configuration
 AUDIO_SAMPLE_RATE=16000
 AUDIO_CHANNELS=1
 AUDIO_CHUNK_SIZE=1024
+AUDIO_DEVICE_INDEX=0
 
-# AI Services (Add your API keys here)
-GOOGLE_CLOUD_PROJECT=your-project-id
-GOOGLE_APPLICATION_CREDENTIALS=$INSTALL_DIR/credentials/google-cloud-key.json
-GEMINI_API_KEY=your-gemini-api-key
-PORCUPINE_ACCESS_KEY=your-porcupine-key
-OPENAI_API_KEY=your-openai-key
-ELEVENLABS_API_KEY=your-elevenlabs-key
+# Wake Word Configuration
+WAKE_WORD_SERVICE=openwakeword
+WAKE_WORD_MODEL=hey_elsa
+WAKE_WORD_THRESHOLD=0.7
+WAKE_WORD_SENSITIVITY=0.5
 
-# STT (Speech-to-Text) settings
+# STT Configuration
 STT_SERVICE=google
-STT_LANGUAGE=en-US
-STT_TIMEOUT=10
-STT_PHRASE_TIME_LIMIT=30
+STT_LANGUAGE_CODE=$SYSTEM_LANGUAGE
+STT_MODEL=latest_short
+STT_TIMEOUT=10.0
+STT_REMOTE_ONLY=true
 
-# LLM (Language Model) settings
-LLM_SERVICE=google
-LLM_MODEL=gemini-pro
-LLM_MAX_TOKENS=150
-LLM_TEMPERATURE=0.7
-LLM_SYSTEM_PROMPT=You are a friendly storyteller for children. Keep stories short, fun, and age-appropriate.
+# LLM Configuration
+LLM_SERVICE=openai
+LLM_MODEL=gpt-4
+LLM_TEMPERATURE=0.8
+LLM_MAX_TOKENS=800
+LLM_REMOTE_ONLY=true
 
-# TTS (Text-to-Speech) settings
-TTS_SERVICE=google
-TTS_VOICE=en-US-Wavenet-F
-TTS_SPEED=1.0
-TTS_PITCH=0.0
+# TTS Configuration
+TTS_SERVICE=elevenlabs
+TTS_LANGUAGE=tr
+TTS_VOICE_GENDER=female
+TTS_VOICE_AGE=young_adult
+TTS_VOICE_STYLE=storyteller
+TTS_VOICE_STABILITY=0.8
+TTS_VOICE_SIMILARITY_BOOST=0.7
+TTS_REMOTE_ONLY=true
 
-# Web interface
-WEB_SECRET_KEY=storytellerpi-optimized-$(date +%s)
+# Web Interface Configuration
 WEB_HOST=0.0.0.0
 WEB_PORT=5000
-WEB_INTERFACE=lite
 WEB_DEBUG=false
+WEB_SECRET_KEY=your-secret-key-here
 
-# Service settings
-SERVICE_NAME=$SERVICE_NAME
-SERVICE_USER=$SERVICE_USER
-OPTIMIZED_FOR_PI_ZERO=true
+# Story Configuration
+STORY_THEMES=prenses,peri,dostluk,macera,hayvanlar
+STORY_LENGTH=short
+STORY_TONE=gentle_enthusiastic
+STORY_INCLUDE_MORAL=true
+STORY_AVOID_SCARY=true
+STORY_CONTENT_FILTER=very_strict
 
-# Logging settings
-LOG_FORMAT=%(asctime)s - %(name)s - %(levelname)s - %(message)s
-LOG_MAX_BYTES=10485760
+# API Keys (Replace with your actual keys)
+OPENAI_API_KEY=your-openai-api-key
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
+GOOGLE_APPLICATION_CREDENTIALS=$INSTALL_DIR/credentials/google-credentials.json
+
+# Service Management
+SERVICE_AUTOSTART=true
+SERVICE_RESTART_DELAY=5
+SERVICE_MAX_RESTARTS=3
+
+# Logging Configuration
+LOG_LEVEL=INFO
+LOG_FILE=$INSTALL_DIR/logs/storyteller.log
+LOG_MAX_SIZE=10MB
 LOG_BACKUP_COUNT=5
 
-# Development settings
-DEVELOPMENT_MODE=false
-DEBUG_MEMORY=false
-DEBUG_AUDIO=false
+# Security Configuration
+ALLOWED_HOSTS=localhost,127.0.0.1
+CORS_ORIGINS=http://localhost:*
+ENABLE_AUTHENTICATION=false
 EOF
     
-    sudo chown "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/.env"
-    log_success "Configuration created"
+    # Set permissions
+    chmod 600 "$INSTALL_DIR/.env"
+    
+    log_success "Environment dosyası oluşturuldu"
 }
 
-create_systemd_services() {
-    log_info "Creating systemd services..."
+create_credentials_templates() {
+    log_info "Credentials şablonları oluşturuluyor..."
     
-    # Main service
-    cat > /tmp/storytellerpi.service << EOF
+    # Google Cloud credentials template
+    cat > "$INSTALL_DIR/credentials/google-credentials-template.json" << EOF
+{
+  "type": "service_account",
+  "project_id": "your-project-id",
+  "private_key_id": "your-private-key-id",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nYour private key here\n-----END PRIVATE KEY-----\n",
+  "client_email": "your-service-account@your-project-id.iam.gserviceaccount.com",
+  "client_id": "your-client-id",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project-id.iam.gserviceaccount.com"
+}
+EOF
+    
+    # API keys template
+    cat > "$INSTALL_DIR/credentials/api-keys-template.txt" << EOF
+# StorytellerPi API Keys Configuration
+# Copy this file to api-keys.txt and replace with your actual API keys
+
+# OpenAI API Key
+# Get from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your-openai-api-key
+
+# ElevenLabs API Key
+# Get from: https://elevenlabs.io/
+ELEVENLABS_API_KEY=your-elevenlabs-api-key
+
+# Google Cloud Speech API
+# Setup Google Cloud Project and enable Speech-to-Text API
+# Download service account credentials JSON file
+# Place in credentials/google-credentials.json
+
+# Optional: ElevenLabs Voice ID
+# Find voice ID from ElevenLabs dashboard
+ELEVENLABS_VOICE_ID=your-preferred-voice-id
+EOF
+    
+    log_success "Credentials şablonları oluşturuldu"
+}
+
+# =============================================================================
+# SYSTEMD SERVICE
+# =============================================================================
+
+create_systemd_service() {
+    log_info "Systemd servisi oluşturuluyor..."
+    
+    sudo tee /etc/systemd/system/$SERVICE_NAME.service > /dev/null << EOF
 [Unit]
-Description=StorytellerPi - Voice-activated storytelling device (Pi Zero 2W Optimized)
+Description=StorytellerPi - AI Storyteller for Children
 After=network.target sound.target
 Wants=network.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_USER
-WorkingDirectory=$INSTALL_DIR/main
-Environment=PATH=$INSTALL_DIR/venv/bin
-ExecStart=$INSTALL_DIR/venv/bin/python storyteller_main.py
+User=$CURRENT_USER
+Group=$CURRENT_USER
+WorkingDirectory=$INSTALL_DIR
+Environment=PATH=$VENV_DIR/bin
+ExecStart=$VENV_DIR/bin/python $INSTALL_DIR/main/storyteller_main.py
+ExecReload=/bin/kill -HUP \$MAINPID
 Restart=always
 RestartSec=10
+KillMode=mixed
+TimeoutStopSec=30
+
+# Environment
+EnvironmentFile=$INSTALL_DIR/.env
+
+# Logging
 StandardOutput=journal
 StandardError=journal
-MemoryMax=350M
-CPUQuota=85%
-EnvironmentFile=$INSTALL_DIR/.env
+SyslogIdentifier=$SERVICE_NAME
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=$INSTALL_DIR
+ReadOnlyPaths=/
+ProtectHome=true
 
 [Install]
 WantedBy=multi-user.target
 EOF
     
-    # Web service
-    cat > /tmp/storytellerpi-web.service << EOF
-[Unit]
-Description=StorytellerPi Web Interface (Lite Mode)
-After=network.target
-Wants=network.target
-
-[Service]
-Type=simple
-User=$SERVICE_USER
-Group=$SERVICE_USER
-WorkingDirectory=$INSTALL_DIR/main
-Environment=PATH=$INSTALL_DIR/venv/bin
-ExecStart=$INSTALL_DIR/venv/bin/python web_interface.py
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-MemoryMax=80M
-EnvironmentFile=$INSTALL_DIR/.env
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    
-    sudo mv /tmp/storytellerpi.service /etc/systemd/system/
-    sudo mv /tmp/storytellerpi-web.service /etc/systemd/system/
+    # Reload systemd and enable service
     sudo systemctl daemon-reload
+    sudo systemctl enable $SERVICE_NAME.service
     
-    log_success "Systemd services created"
+    log_success "Systemd servisi oluşturuldu"
 }
 
-create_management_tools() {
-    log_info "Creating management tools..."
-    
-    # Memory monitor
-    cat > "$INSTALL_DIR/scripts/memory_monitor.py" << 'EOF'
-#!/usr/bin/env python3
-import psutil
-import time
+# =============================================================================
+# DIAGNOSTIC FUNCTIONS
+# =============================================================================
 
-def monitor_memory():
-    memory = psutil.virtual_memory()
-    print(f"Memory Usage: {memory.percent:.1f}%")
-    print(f"Available: {memory.available // (1024*1024)}MB")
-    print(f"Used: {memory.used // (1024*1024)}MB")
+run_diagnostics() {
+    log_info "Sistem tanılaması başlatılıyor..."
     
-    if memory.percent > 80:
-        print("WARNING: High memory usage!")
-    
-    # Show top processes
-    print("\nTop Memory Processes:")
-    for proc in psutil.process_iter(['pid', 'name', 'memory_percent']):
-        try:
-            if proc.info['memory_percent'] > 1.0:
-                print(f"  {proc.info['name']}: {proc.info['memory_percent']:.1f}%")
-        except:
-            pass
-
-if __name__ == "__main__":
-    monitor_memory()
-EOF
-    
-    # Audio test script
-    cat > "$INSTALL_DIR/scripts/test_audio.sh" << 'EOF'
-#!/bin/bash
-echo "=== Audio Test ==="
-echo "1. ALSA Devices:"
-aplay -l
-echo -e "\n2. Testing playback:"
-timeout 3 speaker-test -t sine -f 1000 -l 1 || echo "Audio test failed"
-echo -e "\n3. USB Audio Detection:"
-lsusb | grep -i audio || echo "No USB audio found"
-EOF
-    
-    sudo chmod +x "$INSTALL_DIR/scripts"/*.py
-    sudo chmod +x "$INSTALL_DIR/scripts"/*.sh
-    sudo chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR/scripts"
-    
-    log_success "Management tools created"
-}
-
-setup_logrotate() {
-    log_info "Setting up log rotation..."
-    
-    cat > /tmp/storytellerpi-logrotate << EOF
-$INSTALL_DIR/logs/*.log {
-    daily
-    rotate 7
-    compress
-    delaycompress
-    missingok
-    notifempty
-    create 0644 $SERVICE_USER $SERVICE_USER
-}
-EOF
-    
-    sudo mv /tmp/storytellerpi-logrotate /etc/logrotate.d/storytellerpi
-    log_success "Log rotation configured"
-}
-
-cleanup_installation() {
-    log_info "Cleaning up installation..."
-    
-    sudo -u "$SERVICE_USER" "$INSTALL_DIR/venv/bin/pip" cache purge 2>/dev/null || true
-    sudo apt clean
-    sudo apt autoremove -y
-    cleanup_swap
-    
-    log_success "Installation cleanup completed"
-}
-
-print_final_instructions() {
-    log_success "StorytellerPi Complete Setup Finished!"
-    echo
     echo "=========================================="
-    echo "NEXT STEPS"
+    echo "StorytellerPi Sistem Tanılaması"
     echo "=========================================="
-    echo
-    echo "1. Configure API Keys:"
-    echo "   sudo nano $INSTALL_DIR/.env"
-    echo "   Add your Porcupine and Google Cloud credentials"
-    echo
-    echo "2. Copy Wake Word Model:"
-    echo "   sudo cp your_model.ppn $INSTALL_DIR/models/hey_elsa.ppn"
-    echo
-    echo "3. Start Services:"
-    echo "   sudo systemctl enable storytellerpi-web"
-    echo "   sudo systemctl start storytellerpi-web"
-    echo "   sudo systemctl enable storytellerpi"
-    echo "   sudo systemctl start storytellerpi"
-    echo
-    echo "4. Access Web Interface:"
-    echo "   http://$(hostname -I | awk '{print $1}'):5000"
-    echo
-    echo "5. Test Audio:"
-    echo "   sudo $INSTALL_DIR/scripts/test_audio.sh"
-    echo
-    echo "6. Monitor System:"
-    echo "   python3 $INSTALL_DIR/scripts/memory_monitor.py"
-    echo "   sudo journalctl -u storytellerpi -f"
-    echo
-    echo "=========================================="
-    echo "OPTIMIZATION FEATURES"
-    echo "=========================================="
-    echo "✅ Memory optimized for Pi Zero 2W (300MB limit)"
-    echo "✅ Lazy loading services"
-    echo "✅ USB audio auto-detection"
-    echo "✅ Lite web interface"
-    echo "✅ Automatic memory monitoring"
-    echo "✅ DietPi compatible"
-    echo "✅ System service management"
-    echo
-    echo "Installation directory: $INSTALL_DIR"
-    echo "System type: $([ $IS_DIETPI == true ] && echo "DietPi" || echo "Standard Linux")"
-    echo
-    log_success "Setup completed successfully!"
-}
-
-# Trap to cleanup on exit
-trap cleanup_swap EXIT
-
-# Main installation process
-main() {
-    log_info "Starting StorytellerPi Complete Setup for Pi Zero 2W..."
     
-    if [[ $EUID -ne 0 ]]; then
-        log_error "This script must be run as root (use sudo)"
-        exit 1
+    # System information
+    echo -e "\n${CYAN}Sistem Bilgileri:${NC}"
+    echo "İşletim Sistemi: $OS_TYPE"
+    echo "Pi Modeli: $PI_MODEL"
+    echo "Ses Cihazı: $PI_AUDIO_DEVICE"
+    echo "Ses Konfigürasyonu: $AUDIO_SETUP_TYPE"
+    echo "Dil: $SYSTEM_LANGUAGE"
+    
+    # Hardware check
+    echo -e "\n${CYAN}Donanım Kontrolü:${NC}"
+    if [[ -f /proc/cpuinfo ]]; then
+        echo "CPU: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)"
+        echo "Bellek: $(free -h | grep Mem | awk '{print $2}')"
     fi
     
-    detect_system
-    check_system_resources
-    create_temporary_swap
-    install_system_dependencies
-    create_user_and_directories
-    setup_python_environment
-    install_python_dependencies
-    create_optimized_application_files
-    configure_usb_audio
-    create_configuration
-    create_systemd_services
-    create_management_tools
-    setup_logrotate
-    cleanup_installation
-    print_final_instructions
+    # Audio check
+    echo -e "\n${CYAN}Ses Sistemi:${NC}"
+    if command -v aplay > /dev/null 2>&1; then
+        echo "ALSA: ✓ Mevcut"
+        aplay -l 2>/dev/null | grep card || echo "Ses kartı bulunamadı"
+    else
+        echo "ALSA: ✗ Mevcut değil"
+    fi
+    
+    if command -v pulseaudio > /dev/null 2>&1; then
+        echo "PulseAudio: ✓ Mevcut"
+        if pulseaudio --check; then
+            echo "PulseAudio: ✓ Çalışıyor"
+        else
+            echo "PulseAudio: ✗ Çalışmıyor"
+        fi
+    else
+        echo "PulseAudio: ✗ Mevcut değil"
+    fi
+    
+    # Python environment
+    echo -e "\n${CYAN}Python Ortamı:${NC}"
+    if [[ -f "$VENV_DIR/bin/activate" ]]; then
+        echo "Sanal ortam: ✓ Mevcut"
+        source "$VENV_DIR/bin/activate"
+        echo "Python: $(python --version)"
+        echo "Pip: $(pip --version)"
+    else
+        echo "Sanal ortam: ✗ Mevcut değil"
+    fi
+    
+    # Project files
+    echo -e "\n${CYAN}Proje Dosyaları:${NC}"
+    [[ -d "$INSTALL_DIR/main" ]] && echo "Ana dosyalar: ✓" || echo "Ana dosyalar: ✗"
+    [[ -d "$INSTALL_DIR/models" ]] && echo "Modeller: ✓" || echo "Modeller: ✗"
+    [[ -f "$INSTALL_DIR/.env" ]] && echo "Konfigürasyon: ✓" || echo "Konfigürasyon: ✗"
+    
+    # Services
+    echo -e "\n${CYAN}Servisler:${NC}"
+    if systemctl is-active $SERVICE_NAME.service > /dev/null 2>&1; then
+        echo "StorytellerPi: ✓ Çalışıyor"
+    else
+        echo "StorytellerPi: ✗ Çalışmıyor"
+    fi
+    
+    # Network
+    echo -e "\n${CYAN}Ağ Bağlantısı:${NC}"
+    if ping -c 1 google.com > /dev/null 2>&1; then
+        echo "İnternet: ✓ Bağlı"
+    else
+        echo "İnternet: ✗ Bağlı değil"
+    fi
+    
+    echo "=========================================="
+    log_success "Sistem tanılaması tamamlandı"
 }
 
+# =============================================================================
+# MAIN FUNCTIONS
+# =============================================================================
+
+show_help() {
+    cat << EOF
+StorytellerPi Master Setup Script
+
+KULLANIM:
+  $0 [KOMUT] [SEÇENEKLER]
+
+KOMUTLAR:
+  install       - Tam kurulum yap
+  setup-audio   - Sadece ses kurulumu
+  setup-python  - Sadece Python ortamı kurulumu
+  setup-service - Sadece systemd servisi kurulumu
+  start         - Servisi başlat
+  stop          - Servisi durdur
+  restart       - Servisi yeniden başlat
+  status        - Servis durumunu göster
+  logs          - Servis loglarını göster
+  diagnostics   - Sistem tanılaması yap
+  uninstall     - Kurulumu kaldır
+  help          - Bu yardım metnini göster
+
+SEÇENEKLER:
+  --language [tr|en]     - Dil seçimi (varsayılan: tr)
+  --child-name NAME      - Çocuk ismi
+  --child-age AGE        - Çocuk yaşı
+  --child-gender GENDER  - Çocuk cinsiyeti
+  --force                - Zorla kurulum
+  --debug                - Debug modu
+
+ÖRNEKLER:
+  $0 install
+  $0 install --language tr --child-name "Zeynep" --child-age 5
+  $0 setup-audio
+  $0 diagnostics
+  $0 start
+  $0 logs
+
+EOF
+}
+
+install_full() {
+    log_info "StorytellerPi tam kurulumu başlatılıyor..."
+    
+    # Check prerequisites
+    check_root
+    check_sudo
+    
+    # Hardware detection
+    detect_pi_model
+    detect_os_type
+    setup_audio_configuration
+    
+    # System setup
+    update_system
+    install_system_packages
+    setup_audio_hardware
+    
+    # Python setup
+    create_python_environment
+    install_python_dependencies
+    
+    # Project setup
+    setup_project_structure
+    create_environment_file
+    create_credentials_templates
+    
+    # Service setup
+    create_systemd_service
+    
+    # Final steps
+    log_success "StorytellerPi kurulumu tamamlandı!"
+    log_info "Sıradaki adımlar:"
+    log_info "1. API anahtarlarını yapılandırın: $INSTALL_DIR/credentials/"
+    log_info "2. Konfigürasyonu kontrol edin: $INSTALL_DIR/.env"
+    log_info "3. Sistemi yeniden başlatın: sudo reboot"
+    log_info "4. Servisi başlatın: $0 start"
+    log_info "5. Durumu kontrol edin: $0 status"
+}
+
+setup_audio_only() {
+    log_info "Sadece ses kurulumu..."
+    
+    detect_pi_model
+    detect_os_type
+    setup_audio_configuration
+    setup_audio_hardware
+    
+    log_success "Ses kurulumu tamamlandı"
+}
+
+setup_python_only() {
+    log_info "Sadece Python ortamı kurulumu..."
+    
+    create_python_environment
+    install_python_dependencies
+    
+    log_success "Python ortamı kurulumu tamamlandı"
+}
+
+setup_service_only() {
+    log_info "Sadece systemd servisi kurulumu..."
+    
+    create_systemd_service
+    
+    log_success "Systemd servisi kurulumu tamamlandı"
+}
+
+start_service() {
+    log_info "StorytellerPi servisi başlatılıyor..."
+    
+    sudo systemctl start $SERVICE_NAME.service
+    
+    if systemctl is-active $SERVICE_NAME.service > /dev/null; then
+        log_success "Servis başarıyla başlatıldı"
+    else
+        log_error "Servis başlatılamadı"
+        exit 1
+    fi
+}
+
+stop_service() {
+    log_info "StorytellerPi servisi durduruluyor..."
+    
+    sudo systemctl stop $SERVICE_NAME.service
+    
+    log_success "Servis durduruldu"
+}
+
+restart_service() {
+    log_info "StorytellerPi servisi yeniden başlatılıyor..."
+    
+    sudo systemctl restart $SERVICE_NAME.service
+    
+    if systemctl is-active $SERVICE_NAME.service > /dev/null; then
+        log_success "Servis yeniden başlatıldı"
+    else
+        log_error "Servis yeniden başlatılamadı"
+        exit 1
+    fi
+}
+
+show_service_status() {
+    log_info "StorytellerPi servis durumu..."
+    
+    systemctl status $SERVICE_NAME.service
+}
+
+show_service_logs() {
+    log_info "StorytellerPi servis logları..."
+    
+    journalctl -u $SERVICE_NAME.service -f
+}
+
+uninstall_service() {
+    log_info "StorytellerPi kaldırılıyor..."
+    
+    # Stop and disable service
+    sudo systemctl stop $SERVICE_NAME.service
+    sudo systemctl disable $SERVICE_NAME.service
+    sudo rm -f /etc/systemd/system/$SERVICE_NAME.service
+    sudo systemctl daemon-reload
+    
+    # Remove installation directory
+    sudo rm -rf "$INSTALL_DIR"
+    
+    log_success "StorytellerPi kaldırıldı"
+}
+
+# =============================================================================
+# MAIN SCRIPT
+# =============================================================================
+
+main() {
+    local command="${1:-help}"
+    
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --language)
+                case $2 in
+                    tr|turkish)
+                        LANGUAGE="turkish"
+                        SYSTEM_LANGUAGE="tr-TR"
+                        ;;
+                    en|english)
+                        LANGUAGE="english"
+                        SYSTEM_LANGUAGE="en-US"
+                        ;;
+                esac
+                shift 2
+                ;;
+            --child-name)
+                CHILD_NAME="$2"
+                shift 2
+                ;;
+            --child-age)
+                CHILD_AGE="$2"
+                shift 2
+                ;;
+            --child-gender)
+                CHILD_GENDER="$2"
+                shift 2
+                ;;
+            --force)
+                FORCE_INSTALL=true
+                shift
+                ;;
+            --debug)
+                set -x
+                shift
+                ;;
+            *)
+                if [[ $1 != -* ]]; then
+                    command="$1"
+                fi
+                shift
+                ;;
+        esac
+    done
+    
+    # Execute command
+    case $command in
+        install)
+            install_full
+            ;;
+        setup-audio)
+            setup_audio_only
+            ;;
+        setup-python)
+            setup_python_only
+            ;;
+        setup-service)
+            setup_service_only
+            ;;
+        start)
+            start_service
+            ;;
+        stop)
+            stop_service
+            ;;
+        restart)
+            restart_service
+            ;;
+        status)
+            show_service_status
+            ;;
+        logs)
+            show_service_logs
+            ;;
+        diagnostics)
+            run_diagnostics
+            ;;
+        uninstall)
+            uninstall_service
+            ;;
+        help|--help|-h)
+            show_help
+            ;;
+        *)
+            log_error "Bilinmeyen komut: $command"
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# Run main function
 main "$@"

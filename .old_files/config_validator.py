@@ -18,13 +18,25 @@ class ConfigValidator:
     
     # Required environment variables that must be set
     REQUIRED_VARS = [
-        'GEMINI_API_KEY',
-        'WAKE_WORD_MODEL_PATH',
-        'WAKE_WORD_FRAMEWORK'
+        'OPENAI_API_KEY',
+        'ELEVENLABS_API_KEY', 
+        'ELEVENLABS_VOICE_ID',
+        'PORCUPINE_ACCESS_KEY'
     ]
     
     # Optional variables with fallback values
     OPTIONAL_VARS = {
+        # Hardware Configuration
+        'HARDWARE_MODEL': 'unknown',
+        'OPERATING_SYSTEM': 'unknown',
+        'AUDIO_DEVICE': 'default',
+        'AUDIO_ENABLED': 'true',
+        'AUDIO_DRIVER': 'alsa',
+        'AUDIO_SYSTEM': 'alsa',
+        'AUDIO_DEVICE_NAME': 'Default Audio Device',
+        'AUDIO_MIXER_CONTROL': 'Master',
+        'AUDIO_PULSE_SERVER': '',
+        
         # Audio Settings
         'AUDIO_SAMPLE_RATE': '16000',
         'AUDIO_CHANNELS': '1',
@@ -32,23 +44,33 @@ class ConfigValidator:
         'AUDIO_INPUT_DEVICE': 'default',
         'AUDIO_OUTPUT_DEVICE': 'default',
         
-        # Wake Word Settings
-        'WAKE_WORD_THRESHOLD': '0.5',
-        'WAKE_WORD_SAMPLE_RATE': '16000',
-        'WAKE_WORD_BUFFER_SIZE': '1024',
-        'WAKE_WORD_CHANNELS': '1',
+        # Turkish Language Settings
+        'SYSTEM_LANGUAGE': 'tr-TR',
+        'SYSTEM_LOCALE': 'tr_TR.UTF-8',
+        'STORY_LANGUAGE': 'turkish',
+        'CHILD_NAME': 'Küçük Prenses',
+        'CHILD_AGE': '5',
+        'CHILD_GENDER': 'kız',
         
-        # STT Settings
-        'STT_PRIMARY_SERVICE': 'google',
-        'STT_LANGUAGE_CODE': 'en-US',
-        'STT_TIMEOUT': '30.0',
-        'STT_MAX_AUDIO_LENGTH': '60.0',
-        'STT_WHISPER_MODEL': 'whisper-1',
-        'STT_WHISPER_LANGUAGE': 'en',
+        # Wake Word Settings (Turkish)
+        'WAKE_WORD': 'merhaba asistan',
+        'WAKE_WORD_FRAMEWORK': 'porcupine',
+        'WAKE_WORD_SENSITIVITY': '0.7',
+        'WAKE_WORD_MODEL_PATH': '/opt/storytellerpi/models/merhaba-asistan.ppn',
         
-        # LLM Settings
-        'LLM_SERVICE': 'gemini',
-        'LLM_MODEL': 'gemini-2.5-flash',
+        # STT Settings (Remote Only - Turkish)
+        'STT_SERVICE': 'google',
+        'STT_LANGUAGE_CODE': 'tr-TR',
+        'STT_ALTERNATIVE_LANGUAGE': 'tr',
+        'STT_TIMEOUT': '10.0',
+        'STT_MAX_AUDIO_LENGTH': '30.0',
+        'STT_USE_LOCAL_MODELS': 'false',
+        'STT_REMOTE_ONLY': 'true',
+        
+        # LLM Settings (Remote Only - Turkish)
+        'LLM_SERVICE': 'openai',
+        'LLM_MODEL': 'gpt-4',
+        'LLM_LANGUAGE': 'turkish',
         'LLM_TEMPERATURE': '0.7',
         'LLM_MAX_TOKENS': '1000',
         'LLM_CONVERSATION_HISTORY_LIMIT': '10',
@@ -56,33 +78,61 @@ class ConfigValidator:
         'LLM_AGE_APPROPRIATE_CONTENT': '5',
         'LLM_CONTENT_FILTER_LEVEL': 'strict',
         
-        # TTS Settings
+        # TTS Settings (Remote Only - Turkish)
         'TTS_SERVICE': 'elevenlabs',
-        'TTS_VOICE_STABILITY': '0.75',
-        'TTS_VOICE_SIMILARITY_BOOST': '0.75',
-        'TTS_MODEL_ID': 'eleven_multilingual_v2',
+        'TTS_LANGUAGE': 'tr',
+        'TTS_VOICE_GENDER': 'female',
+        'TTS_VOICE_AGE': 'young_adult',
+        'TTS_VOICE_STYLE': 'storyteller',
+        'TTS_VOICE_STABILITY': '0.8',
+        'TTS_VOICE_SIMILARITY_BOOST': '0.7',
+        'TTS_MODEL_ID': 'eleven_turbo_v2',
+        'TTS_REMOTE_ONLY': 'true',
         
-        # System Settings
+        # Child-Specific Story Configuration
+        'STORY_TARGET_AUDIENCE': '5_year_old_girl',
+        'STORY_CONTENT_FILTER': 'very_strict',
+        'STORY_THEMES': 'prenses,peri,dostluk,macera,hayvanlar',
+        'STORY_LENGTH': 'short',
+        'STORY_TONE': 'gentle_enthusiastic',
+        'STORY_INCLUDE_MORAL': 'true',
+        'STORY_AVOID_SCARY': 'true',
+        'STORY_GREETING': 'Merhaba küçük prenses! Bugün sana güzel bir hikaye anlatmak istiyorum.',
+        
+        # System Settings (Pi Zero 2W Optimized)
         'INSTALL_DIR': '/opt/storytellerpi',
         'LOG_DIR': '/opt/storytellerpi/logs',
         'MODELS_DIR': '/opt/storytellerpi/models',
+        'CREDENTIALS_DIR': '/opt/storytellerpi/credentials',
         'LOG_LEVEL': 'INFO',
+        'LOG_LANGUAGE': 'turkish',
         'SERVICE_NAME': 'storytellerpi',
-        'MAX_MEMORY_USAGE': '400',
-        'TARGET_RESPONSE_TIME': '11.0',
+        'MAX_MEMORY_USAGE': '300',
+        'TARGET_RESPONSE_TIME': '8.0',
         
-        # Web Interface
+        # Performance Optimization for Pi Zero 2W
+        'OPTIMIZE_FOR_PI_ZERO': 'true',
+        'USE_LOCAL_MODELS': 'false',
+        'MEMORY_LIMIT': '300',
+        'CPU_LIMIT': '80',
+        'DISABLE_HEAVY_PROCESSING': 'true',
+        
+        # Web Interface (Turkish)
         'WEB_ENABLED': 'true',
+        'WEB_LANGUAGE': 'tr',
+        'WEB_TITLE': 'Hikaye Asistanı',
         'WEB_HOST': '0.0.0.0',
-        'WEB_PORT': '8080',
+        'WEB_PORT': '5000',
         'WEB_DEBUG': 'false',
-        'WEB_SECRET_KEY': 'storytellerpi-change-me',
+        'WEB_SECRET_KEY': 'hikaye-asistani-secret-key',
         
         # Audio Feedback
         'AUDIO_FEEDBACK_ENABLED': 'true',
         'AUDIO_FEEDBACK_VOLUME': '0.3',
         'AUDIO_FEEDBACK_WAKE_WORD_TONE': '880.0',
         'AUDIO_FEEDBACK_WAKE_WORD_DURATION': '0.3',
+        'AUDIO_FALLBACK_MODE': 'false',
+        'AUDIO_SOFTWARE_ONLY': 'false',
         
         # Performance
         'ENABLE_MEMORY_MONITORING': 'true',
@@ -92,11 +142,12 @@ class ConfigValidator:
         'HEALTH_CHECK_INTERVAL': '300.0'
     }
     
-    # Conditional requirements based on service choices
+    # Conditional requirements based on service choices (Remote Only)
     CONDITIONAL_REQUIREMENTS = {
-        'google_stt': ['GOOGLE_CREDENTIALS_JSON', 'GOOGLE_PROJECT_ID'],
-        'openai_fallback': ['OPENAI_API_KEY'],
+        'turkish_storyteller': ['OPENAI_API_KEY', 'ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID', 'PORCUPINE_ACCESS_KEY'],
+        'google_stt': ['GOOGLE_APPLICATION_CREDENTIALS'],
         'elevenlabs_tts': ['ELEVENLABS_API_KEY', 'ELEVENLABS_VOICE_ID'],
+        'openai_llm': ['OPENAI_API_KEY'],
         'porcupine_wake_word': ['PORCUPINE_ACCESS_KEY']
     }
     

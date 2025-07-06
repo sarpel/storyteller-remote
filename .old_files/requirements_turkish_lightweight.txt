@@ -1,0 +1,59 @@
+# Turkish StorytellerPi - Lightweight Requirements
+# Optimized for Pi Zero 2W with REMOTE PROCESSING ONLY
+# No local ML models, everything via APIs
+
+# Core Web Framework
+flask==2.3.3
+flask-socketio==5.3.6
+python-dotenv==1.0.0
+psutil==5.9.6
+
+# Audio (Minimal - Wake Word Only)
+pyaudio==0.2.11
+numpy==1.24.3
+
+# Remote API Clients (Turkish Support)
+openai==1.3.7
+google-cloud-speech==2.21.0
+elevenlabs==0.2.26
+
+# Wake Word Detection (Porcupine Only)
+pvporcupine==2.2.1
+
+# HTTP and Networking
+requests==2.31.0
+urllib3==2.0.7
+aiohttp==3.9.0
+
+# Configuration and Utilities
+pyyaml==6.0.1
+jsonschema==4.17.3
+python-dateutil==2.8.2
+
+# Turkish Language Support
+babel==2.12.1
+
+# Audio Processing (Minimal)
+soundfile==0.12.1
+
+# System Utilities
+pathlib2==2.3.7
+setuptools==68.0.0
+
+# EXCLUDED HEAVY PACKAGES:
+# - whisper (OpenAI Whisper - too heavy for Pi Zero 2W)
+# - torch/tensorflow (ML frameworks - not needed)
+# - transformers (Hugging Face - too heavy)
+# - librosa (Audio analysis - not needed for remote processing)
+# - scipy (Scientific computing - not needed)
+# - pandas (Data analysis - not needed)
+# - matplotlib (Plotting - not needed)
+# - opencv (Computer vision - not needed)
+
+# NOTES:
+# - All speech-to-text via Google Cloud Speech API
+# - All text-to-speech via ElevenLabs API  
+# - All story generation via OpenAI GPT-4 API
+# - Only wake word detection runs locally (Porcupine)
+# - Total memory usage < 300MB
+# - Optimized for Pi Zero 2W performance

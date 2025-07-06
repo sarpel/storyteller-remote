@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hikaye Asistanı - Kontrol Paneli</title>
+    
+    <!-- Turkish fonts and icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;700&family=Fredoka+One:wght@400&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary-color: #ff6b9d;
+            --secondary-color: #c44569;
+            --accent-color: #f8b500;
+            --success-color: #26de81;
+            --warning-color: #ffa502;
+            --danger-color: #fc5c65;
+            --light-bg: #fef7f7;
+            --card-bg: #ffffff;
+            --text-primary: #2c2c54;
+            --text-secondary: #6c757d;
+            --border-color: #ffe4e6;
+            --shadow: 0 4px 6px -1px rgba(255, 107, 157, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Comfortaa', cursive;
+            background: linear-gradient(135deg, #fef7f7 0%, #ffe4e6 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 25px;
+            background: var(--card-bg);
+            border-radius: 20px;
+            box-shadow: var(--shadow);
+            border: 3px solid var(--border-color);
+        }
+
+        .header h1 {
+            font-family: 'Fredoka One', cursive;
+            color: var(--primary-color);
+            font-size: 2.8em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(255, 107, 157, 0.2);
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 1.2em;
+            font-weight: 500;
+        }
+
+        .princess-icon {
+            font-size: 1.5em;
+            color: var(--accent-color);
+            margin: 0 10px;
+            animation: sparkle 2s ease-in-out infinite;
+        }
+
+        @keyframes sparkle {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .card {
+            background: var(--card-bg);
+            border-radius: 15px;
+            padding: 25px;
+            margin-bottom: 25px;
+            box-shadow: var(--shadow);
+            border: 2px solid var(--border-color);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(255, 107, 157, 0.15);
+        }
+
+        .card h2 {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin: 15px 0;
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+
+        .status.running {
+            background: rgba(38, 222, 129, 0.15);
+            color: var(--success-color);
+            border: 2px solid rgba(38, 222, 129, 0.3);
+        }
+
+        .status.stopped {
+            background: rgba(252, 92, 101, 0.15);
+            color: var(--danger-color);
+            border: 2px solid rgba(252, 92, 101, 0.3);
+        }
+
+        .status.unknown {
+            background: rgba(255, 165, 2, 0.15);
+            color: var(--warning-color);
+            border: 2px solid rgba(255, 165, 2, 0.3);
+        }
+
+        .btn {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-family: 'Comfortaa', cursive;
+            font-weight: 600;
+            font-size: 1em;
+            transition: all 0.3s ease;
+            margin: 8px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .btn:hover {
+            background: var(--secondary-color);
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(196, 69, 105, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(-1px);
+        }
+
+        .btn.start { background: var(--success-color); }
+        .btn.start:hover { background: #22c576; }
+
+        .btn.stop { background: var(--danger-color); }
+        .btn.stop:hover { background: #e85a64; }
+
+        .btn.restart { background: var(--warning-color); }
+        .btn.restart:hover { background: #e6941f; }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .stat {
+            text-align: center;
+            padding: 20px;
+            background: rgba(255, 107, 157, 0.05);
+            border-radius: 15px;
+            border: 2px solid rgba(255, 107, 157, 0.1);
+            transition: all 0.3s ease;
+        }
+
+        .stat:hover {
+            background: rgba(255, 107, 157, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .stat-value {
+            font-size: 2.2em;
+            font-weight: 700;
+            color: var(--primary-color);
+            margin-bottom: 8px;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.95em;
+            font-weight: 500;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 25px;
+            color: var(--text-secondary);
+            font-size: 1em;
+            background: var(--card-bg);
+            border-radius: 15px;
+            border: 2px solid var(--border-color);
+        }
+
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            border-radius: 12px;
+            color: white;
+            font-weight: 600;
+            z-index: 1000;
+            max-width: 350px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+            display: none;
+        }
+
+        .notification.success {
+            background: var(--success-color);
+        }
+
+        .notification.error {
+            background: var(--danger-color);
+        }
+
+        .logs-container {
+            max-height: 250px;
+            overflow-y: auto;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid #e9ecef;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 5px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .log-timestamp {
+            color: var(--text-secondary);
+            font-weight: bold;
+        }
+
+        .story-themes {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 15px;
+        }
+
+        .theme-tag {
+            background: rgba(248, 181, 0, 0.1);
+            color: var(--accent-color);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: 600;
+            border: 2px solid rgba(248, 181, 0, 0.2);
+        }
+
+        .pulse {
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>
+                <i class="fas fa-crown princess-icon"></i>
+                Hikaye Asistanı
+                <i class="fas fa-crown princess-icon"></i>
+            </h1>
+            <p>🌟 5 Yaşındaki Küçük Prensesimiz İçin Özel Hikaye Anlatıcısı 🌟</p>
+        </div>
+        
+        <!-- Servis Durumu -->
+        <div class="card">
+            <h2>
+                <i class="fas fa-heartbeat"></i>
+                Hikaye Asistanı Durumu
+            </h2>
+            <div class="status {{ service_status.status }}">
+                <i class="fas fa-circle pulse"></i>
+                <span>
+                    {% if service_status.status == 'running' %}
+                        Hikayeler Anlatmaya Hazır! 🎭
+                    {% elif service_status.status == 'stopped' %}
+                        Uyuyor 😴 (Başlatmaya Hazır)
+                    {% else %}
+                        Durum Kontrol Ediliyor... 🔍
+                    {% endif %}
+                </span>
+            </div>
+            
+            <div class="grid">
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-{{ 'play' if service_status.active else 'stop' }}" 
+                           style="color: {{ 'var(--success-color)' if service_status.active else 'var(--danger-color)' }};"></i>
+                    </div>
+                    <div class="stat-label">
+                        Hikaye Asistanı {{ 'Aktif' if service_status.active else 'Pasif' }}
+                    </div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-microphone" style="color: var(--accent-color);"></i>
+                    </div>
+                    <div class="stat-label">Ses Dinleme Sistemi</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-volume-up" style="color: var(--accent-color);"></i>
+                    </div>
+                    <div class="stat-label">Hikaye Anlatma</div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 25px; text-align: center;">
+                <button class="btn start" onclick="controlService('start')">
+                    <i class="fas fa-play"></i> Hikaye Anlatmaya Başla
+                </button>
+                <button class="btn stop" onclick="controlService('stop')">
+                    <i class="fas fa-stop"></i> Durdur
+                </button>
+                <button class="btn restart" onclick="controlService('restart')">
+                    <i class="fas fa-redo"></i> Yeniden Başlat
+                </button>
+            </div>
+        </div>
+
+        <!-- Sistem Bilgileri -->
+        <div class="card">
+            <h2>
+                <i class="fas fa-microchip"></i>
+                Sistem Performansı
+            </h2>
+            <div class="grid">
+                <div class="stat">
+                    <div class="stat-value">{{ system_info.cpu_percent }}%</div>
+                    <div class="stat-label">İşlemci Kullanımı</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">{{ system_info.memory_percent }}%</div>
+                    <div class="stat-label">Bellek Kullanımı</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">{{ system_info.disk_percent or 0 }}%</div>
+                    <div class="stat-label">Disk Kullanımı</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hikaye Ayarları -->
+        <div class="card">
+            <h2>
+                <i class="fas fa-book-open"></i>
+                Hikaye Türleri ve Temalar
+            </h2>
+            <p style="margin-bottom: 15px; color: var(--text-secondary);">
+                Küçük prensesimiz için özel olarak seçilmiş hikaye konuları:
+            </p>
+            <div class="story-themes">
+                <div class="theme-tag">
+                    <i class="fas fa-crown"></i> Prenses Hikayeleri
+                </div>
+                <div class="theme-tag">
+                    <i class="fas fa-magic"></i> Peri Masalları
+                </div>
+                <div class="theme-tag">
+                    <i class="fas fa-heart"></i> Dostluk Hikayeleri
+                </div>
+                <div class="theme-tag">
+                    <i class="fas fa-globe"></i> Macera Hikayeleri
+                </div>
+                <div class="theme-tag">
+                    <i class="fas fa-paw"></i> Sevimli Hayvanlar
+                </div>
+                <div class="theme-tag">
+                    <i class="fas fa-rainbow"></i> Doğa Hikayeleri
+                </div>
+            </div>
+            <div class="grid" style="margin-top: 20px;">
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-child" style="color: var(--accent-color);"></i>
+                    </div>
+                    <div class="stat-label">5 Yaş Seviyesinde</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-clock" style="color: var(--accent-color);"></i>
+                    </div>
+                    <div class="stat-label">2-3 Dakika Süre</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-shield-alt" style="color: var(--accent-color);"></i>
+                    </div>
+                    <div class="stat-label">Güvenli İçerik</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ses ve Audio Testi -->
+        <div class="card">
+            <h2>
+                <i class="fas fa-volume-up"></i>
+                Ses Sistemi Testi
+            </h2>
+            <p style="margin-bottom: 20px; color: var(--text-secondary);">
+                Hikaye asistanının ses sistemini test ederek her şeyin düzgün çalıştığından emin olun:
+            </p>
+            <div style="text-align: center;">
+                <button class="btn" onclick="testAudio('speaker')" style="background: var(--accent-color);">
+                    <i class="fas fa-volume-up"></i> Hoparlör Testi
+                </button>
+                <button class="btn" onclick="testAudio('microphone')" style="background: var(--accent-color);">
+                    <i class="fas fa-microphone"></i> Mikrofon Testi
+                </button>
+                <button class="btn" onclick="testAudio('greeting')" style="background: var(--accent-color);">
+                    <i class="fas fa-comments"></i> Türkçe Karşılama Testi
+                </button>
+                <button class="btn" onclick="testAudio('wake_word')" style="background: var(--accent-color);">
+                    <i class="fas fa-microphone-alt"></i> "Merhaba Asistan" Testi
+                </button>
+            </div>
+        </div>
+
+        <!-- API Durumu -->
+        <div class="card">
+            <h2>
+                <i class="fas fa-cloud"></i>
+                Uzak Servis Bağlantıları
+            </h2>
+            <div class="grid">
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-robot" style="color: var(--success-color);"></i>
+                    </div>
+                    <div class="stat-label">OpenAI GPT-4<br>(Hikaye Üretimi)</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-microphone-alt" style="color: var(--success-color);"></i>
+                    </div>
+                    <div class="stat-label">Google Speech<br>(Türkçe Dinleme)</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-volume-up" style="color: var(--success-color);"></i>
+                    </div>
+                    <div class="stat-label">ElevenLabs<br>(Türkçe Ses)</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value">
+                        <i class="fas fa-ear-listen" style="color: var(--success-color);"></i>
+                    </div>
+                    <div class="stat-label">Porcupine<br>(Uyandırma Kelimesi)</div>
+                </div>
+            </div>
+            <p style="margin-top: 15px; color: var(--text-secondary); text-align: center; font-size: 0.9em;">
+                ✨ Tüm ağır işlemler uzak sunucularda yapılır - Pi Zero 2W'da minimum kaynak kullanımı
+            </p>
+        </div>
+
+        <!-- Son Aktiviteler -->
+        {% if recent_logs %}
+        <div class="card">
+            <h2>
+                <i class="fas fa-file-alt"></i>
+                Son Aktiviteler
+            </h2>
+            <div class="logs-container">
+                {% for log in recent_logs %}
+                <div class="log-entry">
+                    <span class="log-timestamp">{{ log.timestamp }}</span> - {{ log.message }}
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="footer">
+            <p>
+                <i class="fas fa-heart" style="color: var(--primary-color);"></i>
+                <strong>5 yaşındaki küçük prensesimiz için özel olarak hazırlanmış Türkçe hikaye asistanı</strong>
+                <i class="fas fa-heart" style="color: var(--primary-color);"></i>
+            </p>
+            <p style="margin-top: 10px; font-size: 0.9em;">
+                🎭 Prenses hikayeleri • 🧚‍♀️ Peri masalları • 💖 Dostluk hikayeleri • 🦄 Macera hikayeleri
+            </p>
+        </div>
+    </div>
+
+    <!-- Notification container -->
+    <div id="notification" class="notification"></div>
+
+    <script>
+    function controlService(action) {
+        const actionNames = {
+            'start': 'başlatılıyor',
+            'stop': 'durduruluyor',  
+            'restart': 'yeniden başlatılıyor'
+        };
+        
+        const successMessages = {
+            'start': 'Hikaye asistanı başarıyla başlatıldı! 🎭',
+            'stop': 'Hikaye asistanı durduruldu 😴',
+            'restart': 'Hikaye asistanı yeniden başlatıldı! ✨'
+        };
+        
+        const button = event.target;
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + actionNames[action].charAt(0).toUpperCase() + actionNames[action].slice(1);
+        button.disabled = true;
+        
+        fetch(`/api/service/${action}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(successMessages[action], 'success');
+            } else {
+                showNotification('❌ Hata: ' + data.message, 'error');
+            }
+            setTimeout(() => {
+                location.reload();
+            }, 1500);
+        })
+        .catch(error => {
+            showNotification('🔌 Bağlantı hatası: ' + error, 'error');
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    }
+
+    function testAudio(type) {
+        const testMessages = {
+            'speaker': 'Hoparlör test ediliyor...',
+            'microphone': 'Mikrofon test ediliyor...',
+            'greeting': 'Türkçe karşılama test ediliyor...',
+            'wake_word': 'Uyandırma kelimesi test ediliyor...'
+        };
+        
+        const successMessages = {
+            'speaker': '🔊 Hoparlör testi başarılı!',
+            'microphone': '🎤 Mikrofon testi başarılı!',
+            'greeting': '👋 Türkçe karşılama testi başarılı!',
+            'wake_word': '🎯 "Merhaba Asistan" testi başarılı!'
+        };
+        
+        const button = event.target;
+        const originalText = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + testMessages[type];
+        button.disabled = true;
+        
+        fetch(`/api/test/${type}`, {
+            method: 'POST'
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                showNotification(successMessages[type], 'success');
+            } else {
+                showNotification('❌ Test başarısız: ' + data.message, 'error');
+            }
+            button.innerHTML = originalText;
+            button.disabled = false;
+        })
+        .catch(error => {
+            showNotification('🔌 Test hatası: ' + error, 'error');
+            button.innerHTML = originalText;
+            button.disabled = false;
+        });
+    }
+
+    function showNotification(message, type) {
+        const notification = document.getElementById('notification');
+        notification.textContent = message;
+        notification.className = `notification ${type}`;
+        notification.style.display = 'block';
+        
+        // Auto-hide after 4 seconds
+        setTimeout(() => {
+            notification.style.display = 'none';
+        }, 4000);
+    }
+
+    // Auto-refresh status every 30 seconds
+    setInterval(() => {
+        fetch('/api/system/status')
+            .then(response => response.json())
+            .then(data => {
+                console.log('Durum güncellendi:', data);
+                // Could update status indicators here without full page reload
+            })
+            .catch(error => console.error('Durum güncelleme hatası:', error));
+    }, 30000);
+
+    // Welcome message when page loads
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            showNotification('🌟 Hikaye Asistanı kontrol paneline hoş geldiniz! 👑', 'success');
+        }, 1000);
+    });
+    </script>
+</body>
+</html>
