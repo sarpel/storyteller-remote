@@ -29,7 +29,7 @@ pydub==0.25.1
 # System Utilities
 python-dotenv==1.0.0
 psutil==5.9.5
-requests==2.31.0
+requests==2.32.4
 
 # NOTE: The following are built-in Python modules and should NOT be installed:
 # asyncio, threading, logging, pathlib, enum34, signal, gc, time, os, sys
