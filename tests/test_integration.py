@@ -1,6 +1,7 @@
+#!/usr/bin/env python3
 """
-Integration tests for StorytellerPi
-Tests the complete flow and component interactions
+Integration tests for StorytellerPi services
+Tests service interactions and graceful degradation
 """
 
 import os
@@ -8,320 +9,421 @@ import sys
 import pytest
 import asyncio
 import tempfile
+import logging
 from unittest.mock import Mock, patch, AsyncMock, MagicMock
 from pathlib import Path
 
 # Add main directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'main'))
 
-from storyteller_main import StorytellerApp, AppState
+# Set up test environment
+os.environ['GEMINI_API_KEY'] = 'test_key'
+os.environ['WAKE_WORD_MODEL_PATH'] = '/tmp/test_model.onnx'
+os.environ['WAKE_WORD_FRAMEWORK'] = 'openwakeword'
+
+from config_validator import ConfigValidator
+from service_manager import ServiceManager, ServiceStatus
+from storyteller_main import StorytellerApp
 
 
-@pytest.fixture
-def test_config_file():
-    """Create a temporary configuration file"""
-    config_content = """
-audio:
-  input_device: "default"
-  output_device: "default"
-  sample_rate: 16000
-  chunk_size: 1024
-  channels: 1
-
-wake_word:
-  model_path: "models/test_model.onnx"
-  threshold: 0.7
-  inference_framework: "onnx"
-
-apis:
-  google:
-    credentials_path: "credentials/test-google-creds.json"
-    project_id: "test-project"
-    language_code: "en-US"
-  openai:
-    api_key_path: "credentials/test-openai-key.txt"
-    model: "whisper-1"
-  elevenlabs:
-    api_key_path: "credentials/test-elevenlabs-key.txt"
-    voice_id: "test_voice_id"
-    model_id: "eleven_multilingual_v2"
-    stability: 0.5
-    similarity_boost: 0.8
-
-storyteller:
-  max_conversation_length: 5
-  story_length: "medium"
-  voice_speed: 0.8
-  safety_level: "high"
-  system_prompt: "You are Elsa, a friendly storyteller."
-
-performance:
-  max_memory_mb: 400
-  audio_buffer_size: 4096
-  processing_timeout: 10
-
-logging:
-  level: "INFO"
-  file_path: "logs/test_storyteller.log"
-
-system:
-  auto_start: false
-  graceful_shutdown: true
-"""
+class TestConfigValidation:
+    """Test configuration validation"""
     
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
-        f.write(config_content)
-        yield f.name
-    
-    os.unlink(f.name)
-
-
-@pytest.fixture
-def mock_credentials():
-    """Create mock credential files"""
-    credentials = {}
-    
-    # Google credentials
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-        f.write('{"type": "service_account", "project_id": "test"}')
-        credentials['google'] = f.name
-    
-    # OpenAI key
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        f.write('sk-test-key-123')
-        credentials['openai'] = f.name
-    
-    # ElevenLabs key
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-        f.write('test_elevenlabs_key')
-        credentials['elevenlabs'] = f.name
-    
-    yield credentials
-    
-    # Cleanup
-    for file_path in credentials.values():
-        os.unlink(file_path)
-
-
-class TestStorytellerIntegration:
-    
-    @patch('storyteller_main.os.makedirs')
-    @patch('storyteller_main.logging.basicConfig')
-    def test_app_initialization(self, mock_logging, mock_makedirs, test_config_file):
-        """Test complete application initialization"""
-        with patch('storyteller_main.WakeWordDetector') as mock_wake:
-            with patch('storyteller_main.STTService') as mock_stt:
-                with patch('storyteller_main.StorytellerLLM') as mock_llm:
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
+    def test_valid_configuration(self):
+        """Test valid configuration passes validation"""
+        # Create temporary .env file
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
+            f.write("GEMINI_API_KEY=test_key\n")
+            f.write("WAKE_WORD_MODEL_PATH=/tmp/test_model.onnx\n")
+            f.write("WAKE_WORD_FRAMEWORK=openwakeword\n")
+            temp_env_file = f.name
         
-        assert app.config is not None
-        assert app.state == AppState.IDLE
-        assert app.wake_word_detector is not None
-        assert app.stt_service is not None
-        assert app.llm_service is not None
-        assert app.tts_service is not None
+        try:
+            # Create test model file
+            test_model_path = Path(tempfile.gettempdir()) / 'test_model.onnx'
+            test_model_path.touch()
+            
+            # Update environment variable to use the correct path
+            os.environ['WAKE_WORD_MODEL_PATH'] = str(test_model_path)
+            
+            validator = ConfigValidator(temp_env_file)
+            is_valid = validator.load_and_validate()
+            
+            assert is_valid, f"Configuration should be valid. Errors: {validator.get_validation_errors()}"
+            
+        finally:
+            # Clean up
+            os.unlink(temp_env_file)
+            test_model_path = Path(tempfile.gettempdir()) / 'test_model.onnx'
+            if test_model_path.exists():
+                test_model_path.unlink()
     
-    def test_state_transitions(self, test_config_file):
-        """Test application state transitions"""
-        with patch('storyteller_main.WakeWordDetector'):
-            with patch('storyteller_main.STTService'):
-                with patch('storyteller_main.StorytellerLLM'):
-                    with patch('storyteller_main.TTSService'):
-                        app = StorytellerApp(test_config_file)
+    def test_missing_required_vars(self):
+        """Test missing required variables fails validation"""
+        # Create temporary .env file without required variables
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
+            f.write("AUDIO_SAMPLE_RATE=16000\n")
+            temp_env_file = f.name
         
-        # Test state changes
-        assert app.state == AppState.IDLE
+        try:
+            validator = ConfigValidator(temp_env_file)
+            is_valid = validator.load_and_validate()
+            
+            assert not is_valid, "Configuration should be invalid"
+            assert len(validator.get_validation_errors()) > 0
+            
+        finally:
+            os.unlink(temp_env_file)
+    
+    def test_fallback_values(self):
+        """Test fallback values are set correctly"""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.env', delete=False) as f:
+            f.write("GEMINI_API_KEY=test_key\n")
+            f.write("WAKE_WORD_MODEL_PATH=/tmp/test_model.onnx\n")
+            f.write("WAKE_WORD_FRAMEWORK=openwakeword\n")
+            temp_env_file = f.name
         
-        app._set_state(AppState.LISTENING)
-        assert app.state == AppState.LISTENING
-        
-        app._set_state(AppState.PROCESSING)
-        assert app.state == AppState.PROCESSING
-        
-        app._set_state(AppState.SPEAKING)
-        assert app.state == AppState.SPEAKING
-        
-        app._set_state(AppState.IDLE)
-        assert app.state == AppState.IDLE
+        try:
+            test_model_path = Path(tempfile.gettempdir()) / 'test_model.onnx'
+            test_model_path.touch()
+            
+            # Update environment variable to use the correct path
+            os.environ['WAKE_WORD_MODEL_PATH'] = str(test_model_path)
+            
+            validator = ConfigValidator(temp_env_file)
+            validator.load_and_validate()
+            
+            # Check that fallback values are set
+            assert os.getenv('AUDIO_SAMPLE_RATE') == '16000'
+            assert os.getenv('AUDIO_CHANNELS') == '1'
+            assert os.getenv('LOG_LEVEL') == 'INFO'
+            
+        finally:
+            os.unlink(temp_env_file)
+            test_model_path = Path(tempfile.gettempdir()) / 'test_model.onnx'
+            if test_model_path.exists():
+                test_model_path.unlink()
+
+
+class TestServiceManager:
+    """Test service manager functionality"""
+    
+    @pytest.fixture
+    def mock_config_validator(self):
+        """Create mock config validator"""
+        validator = Mock(spec=ConfigValidator)
+        validator.get_config.return_value = {
+            'audio': {
+                'sample_rate': 16000,
+                'channels': 1,
+                'chunk_size': 1024,
+                'input_device': 'default',
+                'output_device': 'default'
+            },
+            'wake_word': {
+                'framework': 'openwakeword',
+                'model_path': '/tmp/test_model.onnx',
+                'threshold': 0.5,
+                'sample_rate': 16000,
+                'buffer_size': 1024
+            },
+            'stt': {
+                'primary_service': 'google',
+                'language_code': 'en-US',
+                'timeout': 30.0,
+                'max_audio_length': 60.0
+            },
+            'llm': {
+                'service': 'gemini',
+                'model': 'gemini-2.5-flash',
+                'temperature': 0.7,
+                'max_tokens': 1000,
+                'child_safe_mode': True
+            },
+            'tts': {
+                'service': 'elevenlabs',
+                'voice_stability': 0.75,
+                'voice_similarity_boost': 0.75
+            },
+            'system': {
+                'install_dir': '/opt/storytellerpi',
+                'log_dir': '/opt/storytellerpi/logs',
+                'models_dir': '/opt/storytellerpi/models',
+                'log_level': 'INFO',
+                'service_name': 'storytellerpi'
+            }
+        }
+        return validator
     
     @pytest.mark.asyncio
-    async def test_wake_word_detection_flow(self, test_config_file):
-        """Test wake word detection triggers conversation flow"""
-        with patch('storyteller_main.WakeWordDetector') as mock_wake:
-            with patch('storyteller_main.STTService') as mock_stt:
-                with patch('storyteller_main.StorytellerLLM') as mock_llm:
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
-        
-        # Mock the complete flow
-        mock_tts_instance = Mock()
-        mock_tts_instance.speak_text = AsyncMock(return_value=True)
-        mock_tts.return_value = mock_tts_instance
-        app.tts_service = mock_tts_instance
-        
-        mock_stt_instance = Mock()
-        mock_stt_instance.record_audio.return_value = b'fake_audio'
-        mock_stt.return_value = mock_stt_instance
-        app.stt_service = mock_stt_instance
-        
-        # Test wake word callback
-        with patch.object(app, '_process_user_input', new_callable=AsyncMock) as mock_process:
-            await app._handle_wake_word()
-        
-        # Should have played greeting and recorded audio
-        mock_tts_instance.speak_text.assert_called()
-        mock_stt_instance.record_audio.assert_called_once()
-        mock_process.assert_called_once_with(b'fake_audio')
+    async def test_service_manager_initialization(self, mock_config_validator):
+        """Test service manager initialization"""
+        with patch('wake_word_detector.WakeWordDetector') as mock_wake_word:
+            with patch('stt_service.STTService') as mock_stt:
+                with patch('storyteller_llm.StorytellerLLM') as mock_llm:
+                    with patch('tts_service.TTSService') as mock_tts:
+                        with patch('audio_feedback.get_audio_feedback') as mock_audio:
+                            
+                            mock_wake_word.return_value = Mock()
+                            mock_stt.return_value = Mock()
+                            mock_llm.return_value = Mock()
+                            mock_tts.return_value = Mock()
+                            mock_audio.return_value = Mock()
+                            
+                            service_manager = ServiceManager(mock_config_validator)
+                            success = await service_manager.initialize_all_services()
+                            
+                            assert success
+                            assert service_manager.can_operate()
+                            assert service_manager.get_service('wake_word') is not None
+                            assert service_manager.get_service('stt') is not None
+                            assert service_manager.get_service('llm') is not None
+                            assert service_manager.get_service('tts') is not None
     
     @pytest.mark.asyncio
-    async def test_complete_conversation_flow(self, test_config_file):
-        """Test complete conversation flow from STT to TTS"""
-        with patch('storyteller_main.WakeWordDetector'):
-            with patch('storyteller_main.STTService') as mock_stt:
-                with patch('storyteller_main.StorytellerLLM') as mock_llm:
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
-        
-        # Mock services
-        mock_stt_instance = Mock()
-        mock_stt_instance.transcribe_audio = AsyncMock(return_value="Tell me a story")
-        app.stt_service = mock_stt_instance
-        
-        mock_llm_instance = Mock()
-        mock_llm_instance.generate_response = AsyncMock(return_value="Once upon a time...")
-        app.llm_service = mock_llm_instance
-        
-        mock_tts_instance = Mock()
-        mock_tts_instance.speak_text = AsyncMock(return_value=True)
-        app.tts_service = mock_tts_instance
-        
-        # Test complete flow
-        audio_data = b'fake_audio_data'
-        await app._process_user_input(audio_data)
-        
-        # Verify all steps were called
-        mock_stt_instance.transcribe_audio.assert_called_once_with(audio_data)
-        mock_llm_instance.generate_response.assert_called_once_with("Tell me a story", "story_request")
-        mock_tts_instance.speak_text.assert_called()
-    
-    def test_context_type_determination(self, test_config_file):
-        """Test context type determination for different inputs"""
-        with patch('storyteller_main.WakeWordDetector'):
-            with patch('storyteller_main.STTService'):
-                with patch('storyteller_main.StorytellerLLM'):
-                    with patch('storyteller_main.TTSService'):
-                        app = StorytellerApp(test_config_file)
-        
-        # Test story requests
-        assert app._determine_context_type("Tell me a story") == "story_request"
-        assert app._determine_context_type("I want to hear a tale") == "story_request"
-        
-        # Test questions
-        assert app._determine_context_type("What is the sky blue?") == "question"
-        assert app._determine_context_type("How do birds fly?") == "question"
-        assert app._determine_context_type("Why do we sleep?") == "question"
-        
-        # Test general conversation
-        assert app._determine_context_type("Hello") == "conversation"
-        assert app._determine_context_type("I'm happy today") == "conversation"
+    async def test_graceful_degradation(self, mock_config_validator):
+        """Test graceful degradation when services fail"""
+        with patch('wake_word_detector.WakeWordDetector') as mock_wake_word:
+            with patch('stt_service.STTService') as mock_stt:
+                with patch('storyteller_llm.StorytellerLLM') as mock_llm:
+                    with patch('tts_service.TTSService') as mock_tts:
+                        with patch('audio_feedback.get_audio_feedback') as mock_audio:
+                            
+                            # Make TTS service fail
+                            mock_wake_word.return_value = Mock()
+                            mock_stt.return_value = Mock()
+                            mock_llm.return_value = Mock()
+                            mock_tts.side_effect = Exception("TTS service failed")
+                            mock_audio.return_value = Mock()
+                            
+                            service_manager = ServiceManager(mock_config_validator)
+                            success = await service_manager.initialize_all_services()
+                            
+                            # Should still be able to operate with degraded TTS
+                            assert service_manager.can_operate()
+                            assert service_manager.get_service('tts') is None
+                            
+                            # Check service health
+                            tts_health = service_manager.get_service_health('tts')
+                            assert tts_health.status == ServiceStatus.FAILED
     
     @pytest.mark.asyncio
-    async def test_long_response_chunking(self, test_config_file):
-        """Test long response text chunking"""
-        with patch('storyteller_main.WakeWordDetector'):
-            with patch('storyteller_main.STTService'):
-                with patch('storyteller_main.StorytellerLLM'):
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
-        
-        mock_tts_instance = Mock()
-        mock_tts_instance.speak_text = AsyncMock(return_value=True)
-        app.tts_service = mock_tts_instance
-        
-        # Create a long response that should be chunked
-        long_response = "This is a very long story. " * 20  # > 200 characters
-        
-        await app._speak_response(long_response)
-        
-        # Should have been called multiple times for chunks
-        assert mock_tts_instance.speak_text.call_count > 1
+    async def test_health_check(self, mock_config_validator):
+        """Test health check functionality"""
+        with patch('wake_word_detector.WakeWordDetector') as mock_wake_word:
+            with patch('stt_service.STTService') as mock_stt:
+                with patch('storyteller_llm.StorytellerLLM') as mock_llm:
+                    with patch('tts_service.TTSService') as mock_tts:
+                        with patch('audio_feedback.get_audio_feedback') as mock_audio:
+                            
+                            mock_wake_word.return_value = Mock()
+                            mock_stt.return_value = Mock()
+                            mock_llm.return_value = Mock()
+                            mock_tts.return_value = Mock()
+                            mock_audio.return_value = Mock()
+                            
+                            service_manager = ServiceManager(mock_config_validator)
+                            await service_manager.initialize_all_services()
+                            
+                            health_report = await service_manager.health_check()
+                            
+                            assert 'timestamp' in health_report
+                            assert 'overall_status' in health_report
+                            assert 'services' in health_report
+                            assert 'system_info' in health_report
+                            
+                            assert health_report['overall_status'] == 'healthy'
+                            assert health_report['system_info']['can_operate'] is True
+
+
+class TestStorytellerApp:
+    """Test main application functionality"""
+    
+    @pytest.fixture
+    def mock_service_manager(self):
+        """Create mock service manager"""
+        service_manager = Mock(spec=ServiceManager)
+        service_manager.can_operate.return_value = True
+        service_manager.is_service_available.return_value = True
+        service_manager.get_service.return_value = Mock()
+        service_manager.cleanup_services = AsyncMock()
+        service_manager.health_check = AsyncMock(return_value={
+            'timestamp': 1234567890,
+            'overall_status': 'healthy',
+            'services': {},
+            'system_info': {
+                'can_operate': True,
+                'degraded_services': [],
+                'failed_services': []
+            }
+        })
+        return service_manager
     
     @pytest.mark.asyncio
-    async def test_error_handling_stt_failure(self, test_config_file):
-        """Test error handling when STT fails"""
-        with patch('storyteller_main.WakeWordDetector'):
-            with patch('storyteller_main.STTService') as mock_stt:
-                with patch('storyteller_main.StorytellerLLM'):
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
-        
-        # Mock STT failure
-        mock_stt_instance = Mock()
-        mock_stt_instance.transcribe_audio = AsyncMock(return_value=None)
-        app.stt_service = mock_stt_instance
-        
-        mock_tts_instance = Mock()
-        mock_tts_instance.speak_text = AsyncMock(return_value=True)
-        app.tts_service = mock_tts_instance
-        
-        audio_data = b'fake_audio_data'
-        await app._process_user_input(audio_data)
-        
-        # Should have spoken error message
-        mock_tts_instance.speak_text.assert_called()
-        error_message = mock_tts_instance.speak_text.call_args[0][0]
-        assert "couldn't understand" in error_message.lower()
+    async def test_app_initialization(self, mock_service_manager):
+        """Test application initialization"""
+        with patch('storyteller_main.validate_configuration') as mock_validate:
+            with patch('storyteller_main.initialize_services') as mock_init_services:
+                
+                mock_validate.return_value = (True, Mock())
+                mock_init_services.return_value = mock_service_manager
+                
+                app = StorytellerApp()
+                
+                # Initialize services
+                await app._initialize_services()
+                
+                assert app.service_manager is not None
+                assert app.service_manager.can_operate()
     
     @pytest.mark.asyncio
-    async def test_error_handling_llm_failure(self, test_config_file):
-        """Test error handling when LLM fails"""
-        with patch('storyteller_main.WakeWordDetector'):
-            with patch('storyteller_main.STTService') as mock_stt:
-                with patch('storyteller_main.StorytellerLLM') as mock_llm:
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
-        
-        # Mock successful STT but failed LLM
-        mock_stt_instance = Mock()
-        mock_stt_instance.transcribe_audio = AsyncMock(return_value="Tell me a story")
-        app.stt_service = mock_stt_instance
-        
-        mock_llm_instance = Mock()
-        mock_llm_instance.generate_response = AsyncMock(return_value=None)
-        app.llm_service = mock_llm_instance
-        
-        mock_tts_instance = Mock()
-        mock_tts_instance.speak_text = AsyncMock(return_value=True)
-        app.tts_service = mock_tts_instance
-        
-        audio_data = b'fake_audio_data'
-        await app._process_user_input(audio_data)
-        
-        # Should have spoken error message
-        mock_tts_instance.speak_text.assert_called()
-        error_message = mock_tts_instance.speak_text.call_args[0][0]
-        assert "trouble thinking" in error_message.lower()
+    async def test_wake_word_handling(self, mock_service_manager):
+        """Test wake word detection and handling"""
+        with patch('storyteller_main.validate_configuration') as mock_validate:
+            with patch('storyteller_main.initialize_services') as mock_init_services:
+                
+                mock_validate.return_value = (True, Mock())
+                mock_init_services.return_value = mock_service_manager
+                
+                # Mock services
+                mock_tts = Mock()
+                mock_tts.speak_text = AsyncMock()
+                mock_stt = Mock()
+                mock_stt.record_audio.return_value = b'fake_audio_data'
+                mock_stt.transcribe_audio = AsyncMock(return_value="Tell me a story")
+                mock_llm = Mock()
+                mock_llm.generate_response = AsyncMock(return_value="Once upon a time...")
+                
+                def mock_get_service(service_name):
+                    if service_name == 'tts':
+                        return mock_tts
+                    elif service_name == 'stt':
+                        return mock_stt
+                    elif service_name == 'llm':
+                        return mock_llm
+                    return Mock()
+                
+                mock_service_manager.get_service.side_effect = mock_get_service
+                
+                app = StorytellerApp()
+                await app._initialize_services()
+                
+                # Test wake word handling
+                await app._handle_wake_word()
+                
+                # Verify services were called
+                mock_tts.speak_text.assert_called()
+                mock_stt.record_audio.assert_called()
+                mock_stt.transcribe_audio.assert_called()
+                mock_llm.generate_response.assert_called()
     
     @pytest.mark.asyncio
-    async def test_cleanup_resources(self, test_config_file):
-        """Test proper resource cleanup"""
-        with patch('storyteller_main.WakeWordDetector') as mock_wake:
-            with patch('storyteller_main.STTService'):
-                with patch('storyteller_main.StorytellerLLM'):
-                    with patch('storyteller_main.TTSService') as mock_tts:
-                        app = StorytellerApp(test_config_file)
-        
-        # Mock cleanup methods
-        mock_wake_instance = Mock()
-        mock_wake_instance.cleanup = Mock()
-        app.wake_word_detector = mock_wake_instance
-        
-        mock_tts_instance = Mock()
-        mock_tts_instance.cleanup = Mock()
-        app.tts_service = mock_tts_instance
-        
-        await app._cleanup()
-        
-        mock_wake_instance.cleanup.assert_called_once()
-        mock_tts_instance.cleanup.assert_called_once()
+    async def test_error_handling(self, mock_service_manager):
+        """Test error handling in application"""
+        with patch('storyteller_main.validate_configuration') as mock_validate:
+            with patch('storyteller_main.initialize_services') as mock_init_services:
+                
+                mock_validate.return_value = (True, Mock())
+                mock_init_services.return_value = mock_service_manager
+                
+                # Mock services that will fail
+                mock_tts = Mock()
+                mock_tts.speak_text = AsyncMock(side_effect=Exception("TTS failed"))
+                mock_stt = Mock()
+                mock_stt.record_audio.return_value = b'fake_audio_data'
+                mock_stt.transcribe_audio = AsyncMock(side_effect=Exception("STT failed"))
+                
+                def mock_get_service(service_name):
+                    if service_name == 'tts':
+                        return mock_tts
+                    elif service_name == 'stt':
+                        return mock_stt
+                    return Mock()
+                
+                mock_service_manager.get_service.side_effect = mock_get_service
+                
+                app = StorytellerApp()
+                await app._initialize_services()
+                
+                # Test error handling - should not crash
+                try:
+                    await app._handle_wake_word()
+                except Exception as e:
+                    pytest.fail(f"Application should handle errors gracefully: {e}")
+                
+                # Should have attempted to call services
+                mock_tts.speak_text.assert_called()
+
+
+class TestServiceInteractions:
+    """Test interactions between services"""
+    
+    @pytest.mark.asyncio
+    async def test_end_to_end_conversation(self):
+        """Test complete conversation flow"""
+        with patch('config_validator.load_dotenv'):
+            with patch('wake_word_detector.WakeWordDetector') as mock_wake_word:
+                with patch('stt_service.STTService') as mock_stt_class:
+                    with patch('storyteller_llm.StorytellerLLM') as mock_llm_class:
+                        with patch('tts_service.TTSService') as mock_tts_class:
+                            with patch('audio_feedback.get_audio_feedback') as mock_audio:
+                                
+                                # Set up service mocks
+                                mock_wake_word_instance = Mock()
+                                mock_wake_word.return_value = mock_wake_word_instance
+                                
+                                mock_stt_instance = Mock()
+                                mock_stt_instance.record_audio.return_value = b'test_audio'
+                                mock_stt_instance.transcribe_audio = AsyncMock(return_value="Hello")
+                                mock_stt_class.return_value = mock_stt_instance
+                                
+                                mock_llm_instance = Mock()
+                                mock_llm_instance.generate_response = AsyncMock(return_value="Hello there!")
+                                mock_llm_class.return_value = mock_llm_instance
+                                
+                                mock_tts_instance = Mock()
+                                mock_tts_instance.speak_text = AsyncMock()
+                                mock_tts_class.return_value = mock_tts_instance
+                                
+                                mock_audio.return_value = Mock()
+                                
+                                # Create mock validator
+                                validator = Mock(spec=ConfigValidator)
+                                validator.get_config.return_value = {
+                                    'audio': {'sample_rate': 16000, 'channels': 1, 'chunk_size': 1024, 'input_device': 'default', 'output_device': 'default'},
+                                    'wake_word': {'framework': 'openwakeword', 'model_path': '/tmp/test.onnx', 'threshold': 0.5, 'sample_rate': 16000, 'buffer_size': 1024},
+                                    'stt': {'primary_service': 'google', 'language_code': 'en-US', 'timeout': 30.0, 'max_audio_length': 60.0},
+                                    'llm': {'service': 'gemini', 'model': 'gemini-2.5-flash', 'temperature': 0.7, 'max_tokens': 1000, 'child_safe_mode': True},
+                                    'tts': {'service': 'elevenlabs', 'voice_stability': 0.75, 'voice_similarity_boost': 0.75},
+                                    'system': {'install_dir': '/opt/storytellerpi', 'log_dir': '/opt/storytellerpi/logs', 'models_dir': '/opt/storytellerpi/models', 'log_level': 'INFO', 'service_name': 'storytellerpi'}
+                                }
+                                
+                                # Test the complete flow
+                                service_manager = ServiceManager(validator)
+                                await service_manager.initialize_all_services()
+                                
+                                # Simulate conversation
+                                stt_service = service_manager.get_service('stt')
+                                llm_service = service_manager.get_service('llm')
+                                tts_service = service_manager.get_service('tts')
+                                
+                                # Record audio
+                                audio_data = stt_service.record_audio(5.0)
+                                assert audio_data == b'test_audio'
+                                
+                                # Transcribe
+                                text = await stt_service.transcribe_audio(audio_data)
+                                assert text == "Hello"
+                                
+                                # Generate response
+                                response = await llm_service.generate_response(text, "conversation")
+                                assert response == "Hello there!"
+                                
+                                # Speak response
+                                await tts_service.speak_text(response)
+                                mock_tts_instance.speak_text.assert_called_with("Hello there!")
+
+
+if __name__ == "__main__":
+    # Run integration tests
+    pytest.main([__file__, "-v"])

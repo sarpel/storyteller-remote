@@ -1,4 +1,6 @@
-# StorytellerPi - Pi Zero 2W Optimized
+# StorytellerPi 🎭
+
+**Voice-Activated AI Storytelling Device for Children** - Pi Zero 2W Optimized
 
 Voice-activated storytelling device optimized for Raspberry Pi Zero 2W.
 
