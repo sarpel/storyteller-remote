@@ -565,6 +565,7 @@ setup_project_structure() {
     # Set permissions
     chmod +x "$INSTALL_DIR/main"/*.py
     chmod +x "$INSTALL_DIR/scripts"/*.py
+    chmod +x "$INSTALL_DIR/scripts"/*.sh
     
     log_success "Proje yapısı oluşturuldu"
 }

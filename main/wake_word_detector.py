@@ -51,6 +51,12 @@ class WakeWordDetector:
         self.is_running = False
         self.detection_callback = None
         
+        # Testing mode configuration
+        self.testing_mode = os.getenv('WAKE_WORD_TESTING_MODE', 'false').lower() == 'true'
+        self.test_trigger_file = os.getenv('WAKE_WORD_TEST_TRIGGER_FILE', '/tmp/storyteller_wake_trigger')
+        self.test_monitoring_thread = None
+        self.test_monitoring_active = False
+        
         # Audio configuration from environment
         self.sample_rate = int(os.getenv('WAKE_WORD_SAMPLE_RATE', '16000'))
         self.chunk_size = int(os.getenv('WAKE_WORD_BUFFER_SIZE', '1024'))
@@ -163,13 +169,26 @@ class WakeWordDetector:
             return
         
         self.is_running = True
+        
+        # Start normal detection thread
         self.detection_thread = threading.Thread(target=self._detection_loop, daemon=True)
         self.detection_thread.start()
-        self.logger.info("Wake word detection started")
+        
+        # Start testing mode monitor if enabled
+        if self.testing_mode:
+            self._start_test_monitoring()
+            self.logger.info("Wake word detection started (TESTING MODE ENABLED)")
+        else:
+            self.logger.info("Wake word detection started")
     
     def stop_detection(self):
         """Stop wake word detection"""
         self.is_running = False
+        
+        # Stop test monitoring
+        if self.testing_mode:
+            self._stop_test_monitoring()
+        
         if self.detection_thread and self.detection_thread.is_alive():
             self.detection_thread.join(timeout=2.0)
         self.logger.info("Wake word detection stopped")    
@@ -276,3 +295,94 @@ class WakeWordDetector:
             self.model.delete()
         
         self.logger.info("Wake word detector cleaned up")
+    
+    def _start_test_monitoring(self):
+        """Start monitoring for test trigger file"""
+        if not self.testing_mode:
+            return
+        
+        self.test_monitoring_active = True
+        self.test_monitoring_thread = threading.Thread(target=self._test_monitoring_loop, daemon=True)
+        self.test_monitoring_thread.start()
+        
+        # Create FIFO pipe for communication
+        try:
+            if os.path.exists(self.test_trigger_file):
+                os.remove(self.test_trigger_file)
+            os.mkfifo(self.test_trigger_file)
+            os.chmod(self.test_trigger_file, 0o666)  # Allow all users to write
+            self.logger.info(f"Test trigger FIFO created: {self.test_trigger_file}")
+        except Exception as e:
+            self.logger.error(f"Failed to create test trigger FIFO: {e}")
+    
+    def _stop_test_monitoring(self):
+        """Stop test monitoring"""
+        self.test_monitoring_active = False
+        
+        if self.test_monitoring_thread and self.test_monitoring_thread.is_alive():
+            # Send a signal to wake up the monitoring thread
+            try:
+                with open(self.test_trigger_file, 'w') as f:
+                    f.write('STOP\n')
+            except:
+                pass
+            self.test_monitoring_thread.join(timeout=2.0)
+        
+        # Clean up FIFO
+        try:
+            if os.path.exists(self.test_trigger_file):
+                os.remove(self.test_trigger_file)
+        except Exception as e:
+            self.logger.error(f"Failed to remove test trigger FIFO: {e}")
+    
+    def _test_monitoring_loop(self):
+        """Monitor for test trigger commands"""
+        self.logger.info("Test monitoring loop started")
+        
+        while self.test_monitoring_active:
+            try:
+                # Open FIFO for reading (this will block until something is written)
+                with open(self.test_trigger_file, 'r') as f:
+                    command = f.readline().strip()
+                    
+                    if command == 'STOP':
+                        break
+                    elif command.startswith('WAKE'):
+                        # Parse command: WAKE [confidence] [wake_word]
+                        parts = command.split()
+                        confidence = float(parts[1]) if len(parts) > 1 else 1.0
+                        wake_word = parts[2] if len(parts) > 2 else "hey_elsa"
+                        
+                        self.logger.info(f"Test wake word triggered: {wake_word} (confidence: {confidence})")
+                        
+                        # Play audio feedback
+                        try:
+                            play_wake_word_feedback()
+                        except Exception as e:
+                            self.logger.warning(f"Failed to play wake word feedback: {e}")
+                        
+                        # Call detection callback
+                        if self.detection_callback:
+                            self.detection_callback(wake_word, confidence)
+                    
+            except Exception as e:
+                if self.test_monitoring_active:
+                    self.logger.error(f"Error in test monitoring loop: {e}")
+                    time.sleep(1)  # Wait before retrying
+        
+        self.logger.info("Test monitoring loop ended")
+    
+    def trigger_test_wake_word(self, confidence: float = 1.0, wake_word: str = "hey_elsa"):
+        """Programmatically trigger wake word detection (for testing)"""
+        if not self.testing_mode:
+            self.logger.warning("Test wake word trigger called but testing mode is disabled")
+            return False
+        
+        try:
+            with open(self.test_trigger_file, 'w') as f:
+                f.write(f'WAKE {confidence} {wake_word}\n')
+            self.logger.info(f"Test wake word triggered programmatically: {wake_word}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to trigger test wake word: {e}")
+            return False
