@@ -66,3 +66,5 @@ memory_monitor.py
 optimize_config.py
 README_PI_ZERO_OPTIMIZATION.md
 requirements_pi_zero.txt
+.old_files/
+.pytest_cache/
