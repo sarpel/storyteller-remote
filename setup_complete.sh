@@ -570,74 +570,91 @@ setup_project_structure() {
 }
 
 create_environment_file() {
-    log_info "Environment dosyası oluşturuluyor..."
+    log_info "Environment dosyası kopyalanıyor..."
     
-    cat > "$INSTALL_DIR/.env" << EOF
-# StorytellerPi Configuration
-PROJECT_NAME=StorytellerPi
-PROJECT_VERSION=1.0.0
-INSTALL_DIR=$INSTALL_DIR
-LOG_DIR=$INSTALL_DIR/logs
-MODELS_DIR=$INSTALL_DIR/models
-CREDENTIALS_DIR=$INSTALL_DIR/credentials
+    # Copy the existing .env file from project directory
+    if [[ -f "$PROJECT_DIR/.env" ]]; then
+        cp "$PROJECT_DIR/.env" "$INSTALL_DIR/.env"
+        log_success "Environment dosyası kopyalandı"
+    else
+        log_warn "Project directory'de .env dosyası bulunamadı, yeni dosya oluşturuluyor..."
+        
+        # Create basic .env file with correct configurations
+        cat > "$INSTALL_DIR/.env" << EOF
+# StorytellerPi Configuration File
+# Central configuration for all settings, API keys, and options
 
-# System Configuration
-SYSTEM_LANGUAGE=$SYSTEM_LANGUAGE
-STORY_LANGUAGE=$LANGUAGE
-PI_MODEL=$PI_MODEL
-PI_AUDIO_DEVICE=$PI_AUDIO_DEVICE
-OS_TYPE=$OS_TYPE
-AUDIO_SETUP_TYPE=$AUDIO_SETUP_TYPE
+# =============================================================================
+# API CREDENTIALS
+# =============================================================================
 
-# Child Configuration
-CHILD_NAME=$CHILD_NAME
-CHILD_AGE=$CHILD_AGE
-CHILD_GENDER=$CHILD_GENDER
-STORY_TARGET_AUDIENCE=${CHILD_AGE}_year_old_${CHILD_GENDER}
+# Google Gemini API (Primary LLM - Gemini 2.5 Flash)
+GEMINI_API_KEY="your-gemini-api-key"
 
-# Audio Configuration
-AUDIO_SAMPLE_RATE=16000
-AUDIO_CHANNELS=1
-AUDIO_CHUNK_SIZE=1024
-AUDIO_DEVICE_INDEX=0
+# Google Cloud Services (Primary STT - Google Cloud Speech)
+GOOGLE_CREDENTIALS_JSON=credentials/google-credentials.json
+GOOGLE_PROJECT_ID="your-project-id"
 
-# Wake Word Configuration
-WAKE_WORD_SERVICE=openwakeword
-WAKE_WORD_MODEL=hey_elsa
-WAKE_WORD_THRESHOLD=0.7
-WAKE_WORD_SENSITIVITY=0.5
+# OpenAI (Fallback LLM and STT - Whisper)
+OPENAI_API_KEY="your-openai-api-key"
 
-# STT Configuration
-STT_SERVICE=google
-STT_LANGUAGE_CODE=$SYSTEM_LANGUAGE
-STT_MODEL=latest_short
-STT_TIMEOUT=10.0
-STT_REMOTE_ONLY=true
+# ElevenLabs (Primary TTS)
+ELEVENLABS_API_KEY="your-elevenlabs-api-key"
+ELEVENLABS_VOICE_ID="your-voice-id"
 
-# LLM Configuration
-LLM_SERVICE=openai
-LLM_MODEL=gpt-4
-LLM_TEMPERATURE=0.8
-LLM_MAX_TOKENS=800
+# =============================================================================
+# LLM CONFIGURATION (REMOTE)
+# =============================================================================
+
+# Primary LLM Service (Google Gemini 2.5 Flash - Remote)
+LLM_SERVICE=gemini
+LLM_MODEL=gemini-2.5-flash
+LLM_TEMPERATURE=0.7
+LLM_MAX_TOKENS=1000
 LLM_REMOTE_ONLY=true
 
-# TTS Configuration
+# Fallback LLM Service (OpenAI - Remote)
+LLM_FALLBACK_SERVICE=openai
+LLM_FALLBACK_MODEL=gpt-4
+LLM_FALLBACK_TEMPERATURE=0.8
+
+# =============================================================================
+# TEXT-TO-SPEECH CONFIGURATION (REMOTE)
+# =============================================================================
+
+# Primary TTS Service (ElevenLabs - Remote)
 TTS_SERVICE=elevenlabs
-TTS_LANGUAGE=tr
-TTS_VOICE_GENDER=female
-TTS_VOICE_AGE=young_adult
-TTS_VOICE_STYLE=storyteller
-TTS_VOICE_STABILITY=0.8
-TTS_VOICE_SIMILARITY_BOOST=0.7
+TTS_VOICE_ID=your-voice-id
 TTS_REMOTE_ONLY=true
 
-# Web Interface Configuration
-WEB_HOST=0.0.0.0
-WEB_PORT=5000
-WEB_DEBUG=false
-WEB_SECRET_KEY=your-secret-key-here
+# Fallback TTS Service (Google TTS - Remote)
+TTS_FALLBACK_SERVICE=gtts
+TTS_FALLBACK_LANGUAGE=tr
 
-# Story Configuration
+# =============================================================================
+# SPEECH-TO-TEXT CONFIGURATION (REMOTE)
+# =============================================================================
+
+# Primary STT Service (Google Cloud - Remote)
+STT_PRIMARY_SERVICE=google
+STT_LANGUAGE_CODE=tr-TR
+STT_REMOTE_ONLY=true
+
+# Fallback STT Service (OpenAI Whisper - Remote)
+STT_FALLBACK_SERVICE=openai
+STT_WHISPER_MODEL=whisper-1
+STT_WHISPER_LANGUAGE=tr
+
+# =============================================================================
+# CHILD CONFIGURATION
+# =============================================================================
+
+# Child Profile
+CHILD_NAME="Küçük Prenses"
+CHILD_AGE=5
+CHILD_GENDER="kız"
+
+# Story Preferences
 STORY_THEMES=prenses,peri,dostluk,macera,hayvanlar
 STORY_LENGTH=short
 STORY_TONE=gentle_enthusiastic
@@ -645,32 +662,39 @@ STORY_INCLUDE_MORAL=true
 STORY_AVOID_SCARY=true
 STORY_CONTENT_FILTER=very_strict
 
-# API Keys (Replace with your actual keys)
-OPENAI_API_KEY=your-openai-api-key
-ELEVENLABS_API_KEY=your-elevenlabs-api-key
-GOOGLE_APPLICATION_CREDENTIALS=$INSTALL_DIR/credentials/google-credentials.json
+# =============================================================================
+# WEB INTERFACE SETTINGS
+# =============================================================================
 
-# Service Management
-SERVICE_AUTOSTART=true
-SERVICE_RESTART_DELAY=5
-SERVICE_MAX_RESTARTS=3
+# Web Server Configuration
+WEB_ENABLED=true
+WEB_HOST=0.0.0.0
+WEB_PORT=8080
+WEB_DEBUG=false
+WEB_SECRET_KEY=sarpel
 
-# Logging Configuration
-LOG_LEVEL=INFO
-LOG_FILE=$INSTALL_DIR/logs/storyteller.log
-LOG_MAX_SIZE=10MB
-LOG_BACKUP_COUNT=5
+# =============================================================================
+# FEATURE FLAGS
+# =============================================================================
 
-# Security Configuration
-ALLOWED_HOSTS=localhost,127.0.0.1
-CORS_ORIGINS=http://localhost:*
-ENABLE_AUTHENTICATION=false
+# Core Features
+ENABLE_WAKE_WORD=true
+ENABLE_STT=true
+ENABLE_LLM=true
+ENABLE_TTS=true
+ENABLE_MONITORING=true
+
+# Remote Processing
+REMOTE_PROCESSING_ENABLED=true
+FALLBACK_TO_LOCAL=true
+NETWORK_TIMEOUT=30.0
 EOF
+    fi
     
     # Set permissions
     chmod 600 "$INSTALL_DIR/.env"
     
-    log_success "Environment dosyası oluşturuldu"
+    log_success "Environment dosyası hazırlandı"
 }
 
 create_credentials_templates() {

@@ -80,8 +80,11 @@ mypy>=0.991
 # opencv-python>=4.5.0
 
 # Additional audio formats
-# pydub>=0.25.0
+pydub>=0.25.0
 # mutagen>=1.45.0
+
+# Google TTS (fallback)
+gtts>=2.3.0
 
 # Database support
 # sqlalchemy>=1.4.0
